@@ -99,17 +99,43 @@ describe('seedStoreFromFile', () => {
         { method: 'GET', uri: '/second', body: 'two' },
       ]),
     );
-    const store = new MockStore();
+    const store = new MockStore(':memory:');
     const result = seedStoreFromFile(file, store);
-    expect(result).toEqual({ path: file, seeded: 2 });
+    expect(result).toEqual({ path: file, seeded: 2, skipped: 0 });
     expect(store.list().map((r) => r.uri)).toEqual(['/first', '/second']);
     expect(store.list().map((r) => r.body)).toEqual(['one', 'two']);
   });
 
   it('seeds nothing when the file is missing', () => {
-    const store = new MockStore();
+    const store = new MockStore(':memory:');
     const result = seedStoreFromFile(path.join(dir, 'absent.json'), store);
     expect(result.seeded).toBe(0);
     expect(store.list()).toEqual([]);
+  });
+
+  it('skips seeding and leaves existing mocks untouched when the store is non-empty', () => {
+    const file = configFile(
+      'skip.json',
+      JSON.stringify([
+        { method: 'GET', uri: '/from-config', body: 'cfg' },
+        { method: 'GET', uri: '/health', body: 'cfg-health' },
+      ]),
+    );
+    const store = new MockStore(':memory:');
+    const existing = store.add({ method: 'GET', uri: '/runtime', body: 'kept' });
+
+    const result = seedStoreFromFile(file, store);
+
+    expect(result).toEqual({ path: file, seeded: 0, skipped: 2 });
+    expect(store.list().map((r) => r.id)).toEqual([existing.id]);
+    expect(store.list().map((r) => r.body)).toEqual(['kept']);
+  });
+
+  it('still validates the config when the store is non-empty and throws on invalid entries', () => {
+    const file = configFile('bad-nonempty.json', JSON.stringify([{ method: 'FETCH', uri: '/x' }]));
+    const store = new MockStore(':memory:');
+    store.add({ method: 'GET', uri: '/runtime' });
+    expect(() => seedStoreFromFile(file, store)).toThrowError(ConfigError);
+    expect(store.list().map((r) => r.uri)).toEqual(['/runtime']);
   });
 });

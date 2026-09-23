@@ -50,14 +50,22 @@ export function readConfigEntries(filePath: string): MockDefinition[] {
   });
 }
 
-/** Loads the config file (if any) and seeds the store in file order. */
+/**
+ * Reads and validates the config file (always), then seeds the store in file
+ * order only when the store is empty (design D13): a fresh database, or a
+ * restart after clear-all. A non-empty store keeps its persisted state, so
+ * `skipped` reports the entries that were validated but not inserted.
+ */
 export function seedStoreFromFile(
   filePath: string = resolveConfigPath(),
   store: MockStore = getStore(),
-): { path: string; seeded: number } {
+): { path: string; seeded: number; skipped: number } {
   const entries = readConfigEntries(filePath);
+  if (entries.length > 0 && !store.isEmpty()) {
+    return { path: filePath, seeded: 0, skipped: entries.length };
+  }
   for (const entry of entries) {
     store.add(entry);
   }
-  return { path: filePath, seeded: entries.length };
+  return { path: filePath, seeded: entries.length, skipped: 0 };
 }
