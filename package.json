@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "description": "Server to mock API responses: matches requests by method and URI, replies with pre-defined status, headers, and body",
   "scripts": {
     "dev": "next dev",
