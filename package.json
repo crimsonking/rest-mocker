@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "prestart": "node scripts/check-mocks.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "next": "15.5.26",

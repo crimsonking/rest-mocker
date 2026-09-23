@@ -1,0 +1,155 @@
+// End-to-end smoke test (task 6.1): exercises the full mock lifecycle over
+// real HTTP against a running production build.
+//   npm run build && PORT=3100 npm start   # then, in another shell:
+//   npm run smoke                          # target override: MOCK_BASE=...
+let failures = 0;
+let checks = 0;
+
+const BASE = process.env.MOCK_BASE ?? 'http://127.0.0.1:3100';
+
+function check(name, ok, detail) {
+  checks++;
+  if (ok) {
+    console.log(`  ok  ${name}`);
+    return true;
+  }
+  failures++;
+  console.error(`FAIL  ${name}${detail !== undefined ? ` — ${detail}` : ''}`);
+  return false;
+}
+
+function eq(name, actual, expected) {
+  return check(name, JSON.stringify(actual) === JSON.stringify(expected), `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+}
+
+async function req(method, path, body) {
+  const init = { method };
+  if (body !== undefined) {
+    init.headers = { 'content-type': 'application/json' };
+    init.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
+  const res = await fetch(`${BASE}${path}`, init);
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = undefined;
+  }
+  return { status: res.status, headers: res.headers, text, json };
+}
+
+async function register(def) {
+  const res = await req('POST', '/_mocks', def);
+  if (res.status !== 201) {
+    throw new Error(`registration failed for ${def.method} ${def.uri}: ${res.text}`);
+  }
+  return res.json;
+}
+
+async function main() {
+  console.log(`smoke target: ${BASE}`);
+
+  // Deterministic start: clear seeded/registered mocks.
+  eq('clear-all responds 204', (await req('DELETE', '/_mocks')).status, 204);
+  eq('store starts empty', (await req('GET', '/_mocks')).json, []);
+
+  // Registration + exact match.
+  const ping = await register({ method: 'GET', uri: '/ping', status: 200, body: 'pong' });
+  check('registration returns an id', typeof ping.id === 'string' && ping.id.length > 0, ping.id);
+  let r = await req('GET', '/ping');
+  eq('exact match status', r.status, 200);
+  eq('exact match body', r.text, 'pong');
+  check(
+    'string body gets text/plain',
+    (r.headers.get('content-type') ?? '').startsWith('text/plain'),
+    r.headers.get('content-type'),
+  );
+
+  // Path parameter and wildcard matching.
+  await register({ method: 'GET', uri: '/users/:id', body: { echo: 'user' } });
+  await register({ method: 'GET', uri: '/files/*', body: 'wild' });
+  eq('param match', (await req('GET', '/users/42')).json, { echo: 'user' });
+  eq('wildcard match', (await req('GET', '/files/docs/a/b.png')).text, 'wild');
+
+  // Method mismatch → unmatched JSON 404 naming method and path.
+  r = await req('POST', '/ping');
+  eq('method mismatch 404', r.status, 404);
+  eq('unmatched error names method', r.json?.error?.method, 'POST');
+  eq('unmatched error names path', r.json?.error?.path, '/ping');
+
+  // Query string excluded from matching.
+  eq('query ignored', (await req('GET', '/ping?verbose=1&x=2')).text, 'pong');
+
+  // Full pre-defined response: status, headers, JSON body.
+  await register({
+    method: 'POST',
+    uri: '/created',
+    status: 201,
+    headers: { 'X-Trace': 'abc' },
+    body: { created: true },
+  });
+  r = await req('POST', '/created');
+  eq('custom status', r.status, 201);
+  eq('custom header', r.headers.get('x-trace'), 'abc');
+  eq('json body round-trip', r.json, { created: true });
+
+  // Default status when omitted.
+  await register({ method: 'GET', uri: '/plain', body: 'text' });
+  eq('default status 200', (await req('GET', '/plain')).status, 200);
+
+  // Precedence: exact > param > wildcard, latest registration wins ties.
+  await register({ method: 'GET', uri: '/users/me', body: 'me' });
+  eq('exact beats param', (await req('GET', '/users/me')).text, 'me');
+  eq('param still serves other segments', (await req('GET', '/users/42')).json, { echo: 'user' });
+  eq('param beats wildcard', (await req('GET', '/users/7')).json, { echo: 'user' });
+  await register({ method: 'GET', uri: '/ping', body: 'pong2' });
+  eq('latest registration wins', (await req('GET', '/ping')).text, 'pong2');
+
+  // Delete by id.
+  const ping2 = (await req('GET', '/_mocks')).json.find(
+    (m) => m.uri === '/ping' && m.body === 'pong2',
+  );
+  eq('delete by id 204', (await req('DELETE', `/_mocks/${ping2.id}`)).status, 204);
+  eq('older identical mock serves again', (await req('GET', '/ping')).text, 'pong');
+  eq('re-delete same id 404', (await req('DELETE', `/_mocks/${ping2.id}`)).status, 404);
+  r = await req('DELETE', '/_mocks/does-not-exist');
+  eq('unknown id 404', r.status, 404);
+  check('unknown id error is JSON', typeof r.json?.error?.message === 'string', r.text);
+
+  // Invalid registrations are rejected and change nothing.
+  const countBefore = (await req('GET', '/_mocks')).json.length;
+  r = await req('POST', '/_mocks', { uri: '/x' });
+  eq('missing method 400', r.status, 400);
+  check('error details name the method field', JSON.stringify(r.json).includes('"method"'), r.text);
+  eq('reserved uri 400', (await req('POST', '/_mocks', { method: 'GET', uri: '/_mocks/x' })).status, 400);
+  eq('malformed json 400', (await fetch(`${BASE}/_mocks`, { method: 'POST', body: '{not json' })).status, 400);
+  eq('store unchanged after rejections', (await req('GET', '/_mocks')).json.length, countBefore);
+
+  // Reserved prefix: admin API owns it; catch-all never serves mocks there.
+  check('GET /_mocks is the admin list', Array.isArray((await req('GET', '/_mocks')).json));
+  eq('unknown /_mocks subpath 404', (await req('GET', '/_mocks/a/b')).status, 404);
+  eq('PUT /_mocks 405', (await req('PUT', '/_mocks')).status, 405);
+  eq('GET /_mocks/{id} 405', (await req('GET', `/_mocks/${ping.id}`)).status, 405);
+
+  // HEAD strictness (recorded assumption: no GET→HEAD fallback).
+  await register({ method: 'GET', uri: '/h', body: 'get-only' });
+  eq('HEAD does not match GET mock', (await req('HEAD', '/h')).status, 404);
+  await register({ method: 'HEAD', uri: '/h', status: 204, headers: { 'X-H': '1' } });
+  const headRes = await fetch(`${BASE}/h`, { method: 'HEAD' });
+  eq('HEAD mock status', headRes.status, 204);
+  eq('HEAD mock header', headRes.headers.get('x-h'), '1');
+
+  // Clear-all finishes the lifecycle.
+  eq('final clear-all 204', (await req('DELETE', '/_mocks')).status, 204);
+  eq('list empty after clear', (await req('GET', '/_mocks')).json, []);
+  eq('previously matched route now 404', (await req('GET', '/ping')).status, 404);
+
+  console.log(`\n${checks - failures}/${checks} checks passed`);
+  if (failures > 0) process.exit(1);
+}
+
+main().catch((err) => {
+  console.error('smoke crashed:', err);
+  process.exit(1);
+});

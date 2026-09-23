@@ -32,6 +32,6 @@
 
 ## 6. Integration Verification & Docs
 
-- [ ] 6.1 Write and run an end-to-end smoke script against `npm run build && npm start` exercising the full lifecycle over real HTTP: register via POST, exact/param/wildcard matching, precedence override, query-string exclusion, delete-by-id, unmatched 404, clear-all, `/_mocks` never hitting the catch-all, and unsupported admin operations (`PUT /_mocks` and `GET /_mocks/{id}` → 405, unknown `/_mocks/a/b` → JSON 404); verify every step's status, headers, and body match the spec scenarios
+- [x] 6.1 Write and run an end-to-end smoke script against `npm run build && npm start` exercising the full lifecycle over real HTTP: register via POST, exact/param/wildcard matching, precedence override, query-string exclusion, delete-by-id, unmatched 404, clear-all, `/_mocks` never hitting the catch-all, and unsupported admin operations (`PUT /_mocks` and `GET /_mocks/{id}` → 405, unknown `/_mocks/a/b` → JSON 404); verify every step's status, headers, and body match the spec scenarios
 - [ ] 6.2 Write `README.md` covering quick start, admin API reference (all four endpoints with payloads), `mocks.json` format, `MOCK_CONFIG_FILE` env var, and matching/precedence rules; verify each documented command works as written from a clean checkout
 - [ ] 6.3 Run the full gate: `npm test`, `npm run build`, and the 6.1 smoke script; verify all pass with no type errors, and commit history follows conventional commits
