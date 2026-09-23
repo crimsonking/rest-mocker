@@ -16,14 +16,14 @@
 
 ## 3. Admin API (/_mocks)
 
-- [ ] 3.1 Implement `POST /_mocks` in `app/%5Fmocks/route.ts` (validate via D5, register in store, respond 201 with stored mock and `id`); verify with handler-level tests calling the exported function with `Request` objects: valid registration, re-registering the same route succeeds, and each invalid-payload case returns 400 with a JSON error and registers nothing
-- [ ] 3.2 Implement `GET /_mocks` in `app/%5Fmocks/route.ts` (200 JSON array with `id`, `method`, `uri`, `status`, `headers`, `body`, oldest registration first); verify with handler-level tests for empty store, seeded order, and lossless `body` round-trip of a JSON-object body
-- [ ] 3.3 Implement `DELETE /_mocks` (clear-all, 204) and `DELETE /_mocks/{id}` in `app/%5Fmocks/[id]/route.ts` (204 on success, 404 JSON error on unknown id, store unchanged on error); verify with handler-level tests for each outcome
+- [x] 3.1 Implement `POST /_mocks` in `app/%5Fmocks/route.ts` (validate via D5, register in store, respond 201 with stored mock and `id`); verify with handler-level tests calling the exported function with `Request` objects: valid registration, re-registering the same route succeeds, and each invalid-payload case returns 400 with a JSON error and registers nothing
+- [x] 3.2 Implement `GET /_mocks` in `app/%5Fmocks/route.ts` (200 JSON array with `id`, `method`, `uri`, `status`, `headers`, and `body`, oldest registration first); verify with handler-level tests for empty store, seeded order, and lossless `body` round-trip of a JSON-object body
+- [x] 3.3 Implement `DELETE /_mocks` (clear-all, 204) and `DELETE /_mocks/{id}` in `app/%5Fmocks/[id]/route.ts` (204 on success, 404 JSON error on unknown id, store unchanged on error); verify with handler-level tests for each outcome
 
 ## 4. Catch-all Mock Handler
 
-- [ ] 4.1 Implement `app/[[...slug]]/route.ts` exporting all method handlers (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) with `runtime = 'nodejs'` and `dynamic = 'force-dynamic'`: strip query string, normalize trailing slash, consult store + matcher, build the response via `lib/response.ts`, and short-circuit any path under `/_mocks` so it never matches a stored mock; verify `npm run build` passes with the new route
-- [ ] 4.2 Add handler-level tests for the catch-all covering every `mock-routing` spec scenario: exact match, `:param` match, `*` wildcard match, method mismatch → 404, query string ignored, full pre-defined response (status/headers/body), default status 200, precedence trio, unmatched JSON 404 naming method and path, and `/_mocks` guard; verify all tests pass
+- [x] 4.1 Implement `app/[[...slug]]/route.ts` exporting all method handlers (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) with `runtime = 'nodejs'` and `dynamic = 'force-dynamic'`: strip query string, normalize trailing slash, consult store + matcher, build the response via `lib/response.ts`, and short-circuit any path under `/_mocks` so it never matches a stored mock; verify `npm run build` passes with the new route
+- [x] 4.2 Add handler-level tests for the catch-all covering every `mock-routing` spec scenario: exact match, `:param` match, `*` wildcard match, method mismatch → 404, query string ignored, full pre-defined response (status/headers/body), default status 200, precedence trio, unmatched JSON 404 naming method and path, and `/_mocks` guard; verify all tests pass
 
 ## 5. Startup Seeding
 
