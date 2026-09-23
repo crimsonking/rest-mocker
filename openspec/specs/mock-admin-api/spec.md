@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Runtime HTTP management interface, served under the reserved `/_mocks` prefix, for registering, listing, deleting, and clearing mocks while the server runs. All endpoints speak JSON and operate on the shared in-memory mock store.
+Runtime HTTP management interface, served under the reserved `/_mocks` prefix, for registering, listing, deleting, and clearing mocks while the server runs. All endpoints speak JSON and operate on the shared persistent mock store.
 
 ## Requirements
 

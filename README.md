@@ -9,6 +9,8 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
+Requires Node.js ≥ 22.5 — mock state persists via the built-in `node:sqlite` module.
+
 Production:
 
 ```bash
@@ -27,7 +29,7 @@ curl http://localhost:3000/health
 
 ### At runtime — admin API (`/_mocks`)
 
-Mock state lives in memory. Runtime registrations are lost on restart; config-seeded mocks come back.
+Mock state is durable: it lives in a SQLite database, `mocks.db` in the project root by default (override with the `MOCK_DB_FILE` environment variable; relative paths resolve against the project root). Runtime registrations survive restarts and deletes persist. To reset, clear all mocks via `DELETE /_mocks` or delete the database file while the server is stopped. The database file is created automatically and is gitignored.
 
 #### Register — `POST /_mocks`
 
@@ -89,6 +91,7 @@ A JSON array loaded when the server starts:
 - A **missing** file is fine: the server starts with an empty store.
 - An **invalid** file (malformed JSON, not an array, bad entry) stops the server before it listens, with an error naming the file and the offending entry.
 - Entry order matters: with two entries for the same method + URI, the later one wins.
+- Seeding only fills an **empty** store: entries are inserted on a fresh database (first run) or on a restart after clear-all. When the store already holds mocks, the file is still validated — an invalid file still stops the server — but nothing is inserted, so persisted state (including individual deletes of seeded mocks) survives restarts.
 - Seeded mocks behave exactly like runtime ones: they appear in `GET /_mocks` with ids and can be deleted or cleared.
 
 ## Matching & precedence
@@ -110,4 +113,4 @@ npm run build        # production build
 npm run smoke        # E2E lifecycle check; requires a server on MOCK_BASE (default http://127.0.0.1:3100)
 ```
 
-Layout: `lib/` holds the framework-agnostic core (matcher, in-memory store, shared validation, config loader, response assembly); `app/%5Fmocks/` is the admin API (Next.js requires the `%5F` folder escape to serve the literal `/_mocks` URL); `app/[[...slug]]/route.ts` is the catch-all mock handler; `instrumentation.ts` seeds the config at startup; `scripts/` holds the prestart config gate (`check-mocks.ts`, wired via `predev`/`prestart`) and the smoke test.
+Layout: `lib/` holds the framework-agnostic core (matcher, SQLite-backed store, shared validation, config loader, response assembly); `app/%5Fmocks/` is the admin API (Next.js requires the `%5F` folder escape to serve the literal `/_mocks` URL); `app/[[...slug]]/route.ts` is the catch-all mock handler; `instrumentation.ts` seeds the config at startup when the store is empty; `scripts/` holds the prestart config gate (`check-mocks.ts`, wired via `predev`/`prestart`) and the smoke test.
