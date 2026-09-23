@@ -34,7 +34,11 @@ export function buildMockResponse(mock: MockRoute, opts: { omitBody?: boolean } 
   const headers = new Headers(mock.headers);
   const isStringBody = typeof mock.body === 'string';
   const bodyText =
-    mock.body === undefined ? null : isStringBody ? mock.body : JSON.stringify(mock.body);
+    mock.body === undefined
+      ? null
+      : typeof mock.body === 'string'
+        ? mock.body
+        : JSON.stringify(mock.body);
   if (bodyText !== null && !headers.has('content-type')) {
     headers.set('content-type', isStringBody ? 'text/plain;charset=utf-8' : 'application/json');
   }
