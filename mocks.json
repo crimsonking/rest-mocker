@@ -1,0 +1,15 @@
+[
+  {
+    "method": "GET",
+    "uri": "/health",
+    "status": 200,
+    "headers": { "X-Mock": "seeded" },
+    "body": { "status": "ok" }
+  },
+  {
+    "method": "GET",
+    "uri": "/users/:id",
+    "status": 200,
+    "body": { "name": "Demo User", "active": true }
+  }
+]

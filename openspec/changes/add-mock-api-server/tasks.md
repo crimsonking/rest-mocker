@@ -27,8 +27,8 @@
 
 ## 5. Startup Seeding
 
-- [ ] 5.1 Wire seeding: `instrumentation.ts` `register()` (nodejs runtime guard) loads config via `lib/config.ts` into the store, add `scripts/check-mocks.ts` invoking the same loader and `predev`/`prestart` npm scripts running it; verify `npm run dev` with an invalid `mocks.json` exits before listening with an error naming the file and entry, and starts normally when the file is missing or valid
-- [ ] 5.2 Add a sample `mocks.json` with two demo mocks; verify against a started server that `GET /_mocks` lists them with ids, a matching request returns the seeded response, `DELETE /_mocks` clears them, and a restart restores them
+- [x] 5.1 Wire seeding: `instrumentation.ts` `register()` (nodejs runtime guard) loads config via `lib/config.ts` into the store, add `scripts/check-mocks.ts` invoking the same loader and `predev`/`prestart` npm scripts running it; verify `npm run dev` with an invalid `mocks.json` exits before listening with an error naming the file and entry, and starts normally when the file is missing or valid
+- [x] 5.2 Add a sample `mocks.json` with two demo mocks; verify against a started server that `GET /_mocks` lists them with ids, a matching request returns the seeded response, `DELETE /_mocks` clears them, and a restart restores them
 
 ## 6. Integration Verification & Docs
 

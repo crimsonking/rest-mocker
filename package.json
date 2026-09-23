@@ -6,8 +6,10 @@
   "description": "Server to mock API responses: matches requests by method and URI, replies with pre-defined status, headers, and body",
   "scripts": {
     "dev": "next dev",
+    "predev": "node scripts/check-mocks.ts",
     "build": "next build",
     "start": "next start",
+    "prestart": "node scripts/check-mocks.ts",
     "test": "vitest run"
   },
   "dependencies": {
