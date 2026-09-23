@@ -1,0 +1,20 @@
+schema: spec-driven
+context: |
+  Tech stack: TypeScript, Node.js, Nextjs
+  We use conventional commits
+  Domain: developer tool
+  Description: Server to mock API responses. This server can send responses with pre-defined body and headers.
+rules:
+  proposal:
+    - Keep proposals under 500 words
+    - Always include a "Non-goals" section
+  tasks:
+    - Break tasks into chunks of max 20 minutes
+
+operations:
+  apply:
+    guidance:
+      - Keep test summaries concise
+  archive:
+    guidance:
+      - Summarize the archive outcome before finishing
