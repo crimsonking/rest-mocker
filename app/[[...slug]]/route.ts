@@ -1,5 +1,6 @@
 import { findMatchingMock, normalizePath } from '../../lib/matcher.ts';
 import { buildMockResponse, unmatchedResponse } from '../../lib/response.ts';
+import { getStats } from '../../lib/stats.ts';
 import { getStore } from '../../lib/store.ts';
 import { isReservedPath } from '../../lib/validation.ts';
 
@@ -17,8 +18,12 @@ function handleMockRequest(req: Request): Response {
   }
   const mock = findMatchingMock(getStore().list(), req.method, path);
   if (!mock) {
+    // Journal unmatched calls by request path (design D18).
+    getStats().record({ method: req.method, uri: path, matched: false, headers: req.headers });
     return unmatchedResponse(req.method, path);
   }
+  // Journal matched calls under the registered pattern (design D18).
+  getStats().record({ method: req.method, uri: mock.uri, matched: true, headers: req.headers });
   return buildMockResponse(mock, { omitBody: req.method === 'HEAD' });
 }
 

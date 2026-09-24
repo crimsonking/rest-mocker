@@ -140,6 +140,37 @@ async function main() {
   eq('HEAD mock status', headRes.status, 204);
   eq('HEAD mock header', headRes.headers.get('x-h'), '1');
 
+  // Call statistics lifecycle (starts from a reset so earlier traffic does not leak in).
+  eq('stats reset 204', (await req('DELETE', '/_mocks/stats')).status, 204);
+  await register({ method: 'GET', uri: '/stats-ping', body: 'ok' });
+  const callAs = (path, ua) => fetch(`${BASE}${path}`, { headers: { 'user-agent': ua } });
+  await callAs('/stats-ping', 'smoke-a');
+  await callAs('/stats-ping', 'smoke-a');
+  await callAs('/stats-ping', 'smoke-b');
+  await callAs('/stats-missing', 'smoke-a');
+  const stats = (await req('GET', '/_mocks/stats')).json;
+  eq('stats callerHeader', stats?.callerHeader, 'user-agent');
+  eq(
+    'stats ordered count-desc, ties by uri then caller',
+    stats?.entries?.map((e) => [e.method, e.uri, e.matched, e.caller, e.count]),
+    [
+      ['GET', '/stats-ping', true, 'smoke-a', 2],
+      ['GET', '/stats-missing', false, 'smoke-a', 1],
+      ['GET', '/stats-ping', true, 'smoke-b', 1],
+    ],
+  );
+  check(
+    'stats lastCalledAt is ISO 8601',
+    !Number.isNaN(Date.parse(stats?.entries?.[0]?.lastCalledAt)),
+    stats?.entries?.[0]?.lastCalledAt,
+  );
+  eq('stats reset again 204', (await req('DELETE', '/_mocks/stats')).status, 204);
+  eq(
+    'report empty after reset (stats endpoints do not self-record)',
+    (await req('GET', '/_mocks/stats')).json?.entries,
+    [],
+  );
+
   // Clear-all finishes the lifecycle.
   eq('final clear-all 204', (await req('DELETE', '/_mocks')).status, 204);
   eq('list empty after clear', (await req('GET', '/_mocks')).json, []);

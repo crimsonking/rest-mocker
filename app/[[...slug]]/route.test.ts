@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getStore } from '../../lib/store.ts';
+import { getStats } from '../../lib/stats.ts';
 import type { MockDefinition } from '../../lib/validation.ts';
 import type { HttpMethod } from '../../lib/types.ts';
 import { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT } from './route.ts';
@@ -14,8 +15,8 @@ const handlers: Record<string, (req: Request) => Response> = {
   OPTIONS,
 };
 
-function send(method: string, path: string): Response {
-  return handlers[method](new Request(`http://localhost${path}`, { method }));
+function send(method: string, path: string, headers?: Record<string, string>): Response {
+  return handlers[method](new Request(`http://localhost${path}`, { method, headers }));
 }
 
 function add(uri: string, method: HttpMethod = 'GET', extra: Partial<MockDefinition> = {}) {
@@ -24,6 +25,7 @@ function add(uri: string, method: HttpMethod = 'GET', extra: Partial<MockDefinit
 
 beforeEach(() => {
   getStore().clearAll();
+  getStats().reset();
 });
 
 describe('catch-all — matching (mock-routing spec scenarios)', () => {
@@ -159,5 +161,66 @@ describe('catch-all — unmatched and reserved prefix', () => {
     expect(payload.error.path).toBe('/_mocks');
 
     expect(send('GET', '/_mocks/a/b').status).toBe(404);
+  });
+});
+
+describe('catch-all — call recording (mock-stats spec scenarios)', () => {
+  const recorded = () => getStats().snapshot().entries;
+  const as = (caller: string) => ({ 'user-agent': caller });
+
+  it('aggregates matched calls under the registered mock pattern', () => {
+    add('/users/:id', 'GET', { body: 'u' });
+    send('GET', '/users/1', as('suite-a'));
+    send('GET', '/users/2', as('suite-a'));
+    send('GET', '/users/1', as('suite-a'));
+    expect(recorded()).toEqual([
+      expect.objectContaining({
+        method: 'GET',
+        uri: '/users/:id',
+        matched: true,
+        caller: 'suite-a',
+        count: 3,
+      }),
+    ]);
+  });
+
+  it('records unmatched calls under the normalized request path', () => {
+    send('GET', '/nope', as('suite-a'));
+    send('GET', '/nope/', as('suite-a'));
+    send('GET', '/nope?x=1', as('suite-a'));
+    expect(recorded()).toEqual([
+      expect.objectContaining({ uri: '/nope', matched: false, caller: 'suite-a', count: 3 }),
+    ]);
+  });
+
+  it('separates callers on the same endpoint', () => {
+    add('/ping', 'GET', { body: 'pong' });
+    send('GET', '/ping', as('suite-a'));
+    send('GET', '/ping', as('suite-b'));
+    expect(recorded().map((e) => e.caller)).toEqual(['suite-a', 'suite-b']);
+  });
+
+  it('never records reserved-prefix requests', () => {
+    send('GET', '/_mocks', as('suite-a'));
+    send('GET', '/_mocks/deep/sub', as('suite-a'));
+    expect(recorded()).toEqual([]);
+    add('/ping', 'GET', { body: 'pong' });
+    send('GET', '/ping', as('suite-a'));
+    expect(recorded()).toHaveLength(1);
+  });
+
+  it('keeps matched and unmatched history separate when a mock is deleted between calls', () => {
+    const mock = add('/health', 'GET', { body: 'ok' });
+    send('GET', '/health', as('suite-a'));
+    getStore().deleteById(mock.id);
+    send('GET', '/health', as('suite-a'));
+    const entries = recorded();
+    expect(entries).toHaveLength(2);
+    expect(entries.find((e) => e.matched)).toEqual(
+      expect.objectContaining({ uri: '/health', count: 1 }),
+    );
+    expect(entries.find((e) => !e.matched)).toEqual(
+      expect.objectContaining({ uri: '/health', count: 1 }),
+    );
   });
 });
