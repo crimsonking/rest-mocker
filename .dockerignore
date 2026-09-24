@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+.git
+.omp
+openspec
+mocks.db*
+*.tsbuildinfo
+.DS_Store
