@@ -8,7 +8,7 @@ Seeds the mock store from a JSON configuration file at server startup so common 
 
 ### Requirement: Seed mocks from a JSON config file at startup
 
-At startup the server SHALL load mocks from a JSON config file whose path defaults to `mocks.json` in the project root and is overridable via the `MOCK_CONFIG_FILE` environment variable. The file SHALL contain a JSON array of entries, each with `method` and `uri` and optional `status`, `headers`, and `body`. The config file SHALL be read and validated at every startup, but its entries SHALL be registered only when the persistent mock store is empty at startup — a first run on a fresh database, or a restart after clear-all. When the store already holds mocks, no config entries SHALL be inserted and the existing store contents SHALL remain unchanged. Seeded entries SHALL be registered in file order, and seeded mocks SHALL behave exactly like runtime-registered mocks for matching and precedence.
+At startup the server SHALL load mocks from a JSON config file whose path defaults to `mocks.json` in the project root and is overridable via the `MOCK_CONFIG_FILE` environment variable. The file SHALL contain a JSON array of entries, each with `method` and `uri` and optional `status`, `headers`, `body`, and `bodySchema` (a JSON Schema object applied to request bodies per the routing capability). The config file SHALL be read and validated at every startup, but its entries SHALL be registered only when the persistent mock store is empty at startup — a first run on a fresh database, or a restart after clear-all. When the store already holds mocks, no config entries SHALL be inserted and the existing store contents SHALL remain unchanged. Seeded entries SHALL be registered in file order, and seeded mocks SHALL behave exactly like runtime-registered mocks for matching and precedence.
 
 #### Scenario: Seeded mocks match immediately
 
@@ -35,9 +35,14 @@ At startup the server SHALL load mocks from a JSON config file whose path defaul
 - **WHEN** a config-seeded mock was deleted by id while other mocks remain in the store, and the server restarts
 - **THEN** the deleted mock is neither listed nor matched, and the remaining mocks are unchanged
 
+#### Scenario: Seeded body schema is enforced
+
+- **WHEN** the server starts with an empty persistent store and a config entry `POST /orders` declaring a `bodySchema`, and a client sends `POST /orders` with a body failing the schema
+- **THEN** the response is `400` with a JSON error, exactly as for a runtime-registered schema
+
 ### Requirement: Fail fast on invalid config
 
-When the config file exists but cannot be parsed as JSON, is not a JSON array, or contains an entry that fails validation — missing or invalid `method`, `uri` missing or not starting with `/`, `uri` starting with the reserved prefix `/_mocks`, or wrong types for `status`, `headers`, or `body` — the server SHALL refuse to start and SHALL print an error identifying the config file path and the offending entry.
+When the config file exists but cannot be parsed as JSON, is not a JSON array, or contains an entry that fails validation — missing or invalid `method`, `uri` missing or not starting with `/`, `uri` starting with the reserved prefix `/_mocks`, wrong types for `status`, `headers`, or `body`, or a `bodySchema` that is not a valid JSON Schema object — the server SHALL refuse to start and SHALL print an error identifying the config file path and the offending entry.
 
 #### Scenario: Malformed JSON
 
@@ -47,6 +52,30 @@ When the config file exists but cannot be parsed as JSON, is not a JSON array, o
 #### Scenario: Invalid entry
 
 - **WHEN** the server starts with a config file whose third entry has `"method": "FETCH"`
+- **THEN** startup fails with an error naming the file path and the offending entry, and the server does not listen
+
+#### Scenario: Invalid body schema
+
+- **WHEN** the server starts with a config file whose entry has `"bodySchema": {"type": "nope"}`
+- **THEN** startup fails with an error naming the file path and the offending entry, and the server does not listen
+
+### Requirement: Response schemas in the config file
+
+Config file entries MAY declare an optional `responseSchema` field with the same meaning and validation rules as the admin API: a valid, satisfiable JSON Schema object, mutually exclusive with `body`. An entry with a valid `responseSchema` SHALL be seeded like any other entry and SHALL generate a fresh conforming body per call. When an entry's `responseSchema` is invalid or combined with `body`, the server SHALL refuse to start and SHALL print an error identifying the config file path and the offending entry, exactly as for other invalid entries.
+
+#### Scenario: Seeded response schema generates data
+
+- **WHEN** the server starts with an empty persistent store and a config entry `GET /users/:id` declaring a `responseSchema`, and a client sends `GET /users/7`
+- **THEN** the response is `200` with a generated body conforming to the schema, without any admin API call
+
+#### Scenario: Invalid response schema fails startup
+
+- **WHEN** the server starts with a config file whose second entry has `"responseSchema": {"type": "nope"}`
+- **THEN** startup fails with an error naming the file path and the offending entry, and the server does not listen
+
+#### Scenario: Conflicting entry fails startup
+
+- **WHEN** the server starts with a config file whose entry declares both `body` and `responseSchema`
 - **THEN** startup fails with an error naming the file path and the offending entry, and the server does not listen
 
 ### Requirement: Seeded mocks are manageable at runtime

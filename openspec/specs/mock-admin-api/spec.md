@@ -8,7 +8,7 @@ Runtime HTTP management interface, served under the reserved `/_mocks` prefix, f
 
 ### Requirement: Register a mock at runtime
 
-`POST /_mocks` SHALL accept a JSON body with `method` (valid HTTP method), `uri` (path starting with `/`), and optional `status`, `headers`, and `body`, register the mock, and respond `201` with JSON containing the stored mock and its server-assigned unique `id`. The registered mock SHALL immediately participate in request matching. Registering another mock with the same method and URI SHALL succeed; the newer registration wins matching per the precedence rules.
+`POST /_mocks` SHALL accept a JSON body with `method` (valid HTTP method), `uri` (path starting with `/`), and optional `status`, `headers`, `body`, and `bodySchema` (a JSON Schema object applied to request bodies per the routing capability), register the mock, and respond `201` with JSON containing the stored mock and its server-assigned unique `id`. The registered mock SHALL immediately participate in request matching. Registering another mock with the same method and URI SHALL succeed; the newer registration wins matching per the precedence rules.
 
 #### Scenario: Successful registration
 
@@ -20,9 +20,14 @@ Runtime HTTP management interface, served under the reserved `/_mocks` prefix, f
 - **WHEN** a mock for `GET /orders` is registered, then a second mock for `GET /orders` is registered with a different body, and a matching request arrives
 - **THEN** the response comes from the second registration
 
+#### Scenario: Registration with a body schema
+
+- **WHEN** a client sends `POST /_mocks` with `{"method": "POST", "uri": "/orders", "body": {"ok": true}, "bodySchema": {"type": "object", "required": ["name"]}}`
+- **THEN** the response is `201` with the stored mock including `bodySchema`, and a subsequent `POST /orders` with body `{}` receives `400`
+
 ### Requirement: Reject invalid registration payloads
 
-`POST /_mocks` SHALL respond `400` with a JSON error describing the problem, and register nothing, when the payload is not a JSON object, `method` is missing or not a valid HTTP method, `uri` is missing or does not start with `/`, `uri` starts with the reserved prefix `/_mocks`, or `status`/`headers`/`body` have wrong types.
+`POST /_mocks` SHALL respond `400` with a JSON error describing the problem, and register nothing, when the payload is not a JSON object, `method` is missing or not a valid HTTP method, `uri` is missing or does not start with `/`, `uri` starts with the reserved prefix `/_mocks`, `status`/`headers`/`body` have wrong types, or `bodySchema` is present but is not a JSON object that is a valid JSON Schema.
 
 #### Scenario: Missing method
 
@@ -34,14 +39,52 @@ Runtime HTTP management interface, served under the reserved `/_mocks` prefix, f
 - **WHEN** a client sends `POST /_mocks` with `{"method": "GET", "uri": "/_mocks/anything"}`
 - **THEN** the response is `400` with a JSON error and no mock is registered
 
+#### Scenario: Invalid body schema rejected
+
+- **WHEN** a client sends `POST /_mocks` with `{"method": "POST", "uri": "/orders", "bodySchema": {"type": "nope"}}`
+- **THEN** the response is `400` with a JSON error naming `bodySchema`, and no mock is registered
+
 ### Requirement: List all registered mocks
 
-`GET /_mocks` SHALL respond `200` with a JSON array of every registered mock — including `id`, `method`, `uri`, `status`, `headers`, and `body` — ordered oldest registration first.
+`GET /_mocks` SHALL respond `200` with a JSON array of every registered mock — including `id`, `method`, `uri`, `status`, `headers`, `body`, and `bodySchema` when declared — ordered oldest registration first.
 
 #### Scenario: List shows seeded and runtime mocks
 
 - **WHEN** the server was started with one config-seeded mock and one mock was registered via `POST /_mocks`, then a client sends `GET /_mocks`
 - **THEN** the response is `200` with a two-element array, the seeded mock first
+
+#### Scenario: List includes body schema
+
+- **WHEN** a mock registered with `bodySchema` exists and a client sends `GET /_mocks`
+- **THEN** the mock's entry in the response array includes its `bodySchema` as registered
+
+### Requirement: Register and list mocks with a response schema
+
+`POST /_mocks` SHALL accept an optional `responseSchema` field — a valid JSON Schema object — register the mock, and respond `201` with the stored mock including `responseSchema` and its server-assigned `id`. The registered mock SHALL immediately generate responses from the schema. `GET /_mocks` SHALL include `responseSchema` in the listing entry of every mock that declares it, and SHALL omit the field for mocks that do not.
+
+#### Scenario: Registration with a response schema
+
+- **WHEN** a client sends `POST /_mocks` with `{"method": "GET", "uri": "/users/:id", "responseSchema": {"type": "object", "required": ["id", "name"], "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}}}`
+- **THEN** the response is `201` with the stored mock including `responseSchema`, and a subsequent `GET /users/1` returns `200` with a generated body conforming to the schema
+
+#### Scenario: Listing includes the response schema
+
+- **WHEN** a mock registered with `responseSchema` exists alongside a mock without one, and a client sends `GET /_mocks`
+- **THEN** the first mock's entry includes `responseSchema` as registered and the second mock's entry has no `responseSchema` field
+
+### Requirement: Reject invalid or conflicting response schema registrations
+
+`POST /_mocks` SHALL respond `400` with a JSON error describing the problem, and register nothing, when `responseSchema` is present but is not a JSON object that is a valid, satisfiable JSON Schema, or when the payload declares both `body` and `responseSchema`.
+
+#### Scenario: Invalid response schema rejected
+
+- **WHEN** a client sends `POST /_mocks` with `{"method": "GET", "uri": "/x", "responseSchema": {"type": "nope"}}`
+- **THEN** the response is `400` with a JSON error naming `responseSchema`, and no mock is registered
+
+#### Scenario: Body and response schema are mutually exclusive
+
+- **WHEN** a client sends `POST /_mocks` with both `"body": {"a": 1}` and a valid `responseSchema`
+- **THEN** the response is `400` with a JSON error stating that `body` and `responseSchema` cannot be combined, and no mock is registered
 
 ### Requirement: Delete a single mock
 
@@ -50,7 +93,7 @@ Runtime HTTP management interface, served under the reserved `/_mocks` prefix, f
 #### Scenario: Successful delete
 
 - **WHEN** a client deletes a registered mock by `id` and then sends a request that previously matched it
-- **THEN** the delete responds `204` and the request now receives the unmatched `404` JSON error
+- **THEN** the delete responds `204` and the request now receives the unmatched `500` JSON error
 
 #### Scenario: Unknown id
 
@@ -64,7 +107,7 @@ Runtime HTTP management interface, served under the reserved `/_mocks` prefix, f
 #### Scenario: Clear all
 
 - **WHEN** mocks exist from config seeding and runtime registration, a client sends `DELETE /_mocks`, and then sends a request that previously matched
-- **THEN** the clear responds `204`, `GET /_mocks` returns an empty array, and the request receives the unmatched `404` JSON error
+- **THEN** the clear responds `204`, `GET /_mocks` returns an empty array, and the request receives the unmatched `500` JSON error
 
 ### Requirement: Retrieve call statistics
 

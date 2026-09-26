@@ -23,7 +23,7 @@ Every registered mock SHALL be stored durably in the SQLite database. After a se
 #### Scenario: Deletion survives restart
 
 - **WHEN** a mock is deleted by id and the server restarts
-- **THEN** the mock is absent from the listing and a request that previously matched it receives the unmatched `404` JSON error
+- **THEN** the mock is absent from the listing and a request that previously matched it receives the unmatched `500` JSON error
 
 #### Scenario: Clear-all survives restart
 

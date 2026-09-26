@@ -37,7 +37,7 @@ The server SHALL match each inbound request against registered mocks by HTTP met
 
 ### Requirement: Serve the pre-defined response
 
-On a match the server SHALL respond with the mock's registered status code, headers, and body exactly as registered. When the mock registration omits a status code, the response status SHALL be `200`. When it omits headers, no additional response headers SHALL be added beyond server defaults.
+On a match the server SHALL respond with the mock's registered status code, headers, and body exactly as registered. When the mock registration omits a status code, the response status SHALL be `200`. When it omits headers, no additional response headers SHALL be added beyond server defaults. When the matched mock declares a `bodySchema`, the registered response SHALL be served only after the request body passes validation; a failing body receives the `400` described in "Validate request body against mock-declared schema".
 
 #### Scenario: Full pre-defined response
 
@@ -48,6 +48,69 @@ On a match the server SHALL respond with the mock's registered status code, head
 
 - **WHEN** a matching request arrives for a mock registered with only a body
 - **THEN** the response status is `200` and carries the registered body
+
+### Requirement: Validate request body against mock-declared schema
+
+A mock MAY declare an optional `bodySchema`: a JSON Schema object describing the expected request body. When a request matches such a mock by method and URI, the server SHALL read the request body, parse it as JSON, and validate it against `bodySchema`. When validation fails, the server SHALL respond `400` with a JSON error whose `details` list names each violation (its location in the body and a message) instead of serving the mock's registered response. A request with an absent, empty, or non-JSON body SHALL fail validation the same way. When validation succeeds, the registered response SHALL be served unchanged. Body-schema rejection SHALL NOT fall through to lower-precedence mocks: the method+URI winner is final. A call rejected by body validation SHALL still be journaled as a matched call under the registered mock pattern. Mocks without `bodySchema` SHALL behave exactly as before: the request body is never read and cannot cause a `400`.
+
+#### Scenario: Valid body serves the mock response
+
+- **WHEN** a mock for `POST /orders` declares a `bodySchema` requiring a `name` string, and a client sends `POST /orders` with body `{"name": "widget"}`
+- **THEN** the response is the mock's registered status, headers, and body
+
+#### Scenario: Invalid body is rejected with details
+
+- **WHEN** the same mock is registered and a client sends `POST /orders` with body `{"name": 42}`
+- **THEN** the response is `400` with a JSON error whose `details` identify the offending location (`/name`) and the violation, and the mock's registered response is not served
+
+#### Scenario: Missing or non-JSON body is rejected
+
+- **WHEN** a mock with `bodySchema` matches a request whose body is empty or not valid JSON
+- **THEN** the response is `400` with a JSON error
+
+#### Scenario: Schema rejection does not fall through
+
+- **WHEN** both `POST /orders/:id` (with `bodySchema`) and `POST /orders/*` (without) are registered, and a client sends `POST /orders/1` with a body failing the schema
+- **THEN** the response is `400` from the winning mock, not the wildcard mock's response
+
+#### Scenario: Rejected call is journaled as matched
+
+- **WHEN** a request is rejected by body-schema validation and a client sends `GET /_mocks/stats`
+- **THEN** the call counts under the registered mock pattern with `"matched": true`
+
+#### Scenario: Mocks without bodySchema never read the body
+
+- **WHEN** a mock without `bodySchema` matches a request carrying a malformed or absent body
+- **THEN** the registered response is served as before, with no `400`
+
+### Requirement: Generate response body from mock-declared schema
+
+A mock MAY declare an optional `responseSchema`: a JSON Schema object describing its response body. When a request matches such a mock by method and URI, the server SHALL generate a fresh JSON body conforming to `responseSchema` for every call and serve it with the mock's registered status code and headers — a mock with `responseSchema` has no registered body. When no `Content-Type` header is registered, the generated response SHALL be served as `application/json`. `HEAD` requests SHALL receive status and headers with no body, and null-body statuses SHALL omit the generated body, exactly as for static mocks. Mocks without `responseSchema` SHALL be unaffected: their registered responses are served as before.
+
+#### Scenario: Generated body conforms to the schema
+
+- **WHEN** a mock for `GET /users/:id` declares a `responseSchema` requiring an integer `id` and a string `name`, and a client sends `GET /users/42`
+- **THEN** the response is `200` with `Content-Type: application/json` and a body containing an integer `id` and a string `name`
+
+#### Scenario: Fresh data on every call
+
+- **WHEN** a client calls the same `responseSchema` mock twice
+- **THEN** both responses are `200` with bodies conforming to the schema, each generated independently for its call
+
+#### Scenario: Registered status and headers still apply
+
+- **WHEN** a mock with `responseSchema` is registered with status `201` and header `X-Trace: abc`, and a matching request arrives
+- **THEN** the response has status `201`, includes `X-Trace: abc`, and carries the generated body
+
+#### Scenario: HEAD skips the generated body
+
+- **WHEN** a `HEAD` mock with `responseSchema` matches a request
+- **THEN** the response carries the registered status and headers and no body
+
+#### Scenario: Mocks without responseSchema are untouched
+
+- **WHEN** a mock registered with a static `body` and no `responseSchema` matches a request
+- **THEN** the registered body is served exactly as before
 
 ### Requirement: Deterministic precedence for overlapping patterns
 
@@ -68,14 +131,14 @@ When multiple registered mocks match a request, the server SHALL select exactly 
 - **WHEN** two mocks are registered for `GET /orders`, the second after the first, and the server receives `GET /orders`
 - **THEN** the server returns the second mock's response
 
-### Requirement: Unmatched requests receive a JSON 404
+### Requirement: Unmatched requests receive a JSON 500
 
-When no registered mock matches a request and the request does not target the reserved admin prefix, the server SHALL respond with status `404` and a JSON body that identifies the unmatched method and path.
+When no registered mock matches a request and the request does not target the reserved admin prefix, the server SHALL respond with status `500` and a JSON body that identifies the unmatched method and path.
 
 #### Scenario: No matching mock
 
 - **WHEN** the server receives `GET /unknown` and no mock matches
-- **THEN** the response status is `404` with a JSON body naming the method `GET` and the path `/unknown`
+- **THEN** the response status is `500` with a JSON body naming the method `GET` and the path `/unknown`
 
 ### Requirement: Reserved admin prefix is never mockable
 
