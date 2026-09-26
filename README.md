@@ -18,7 +18,7 @@ npm run build
 npm start            # default port 3000; override with PORT=3100 npm start
 ```
 
-The repo ships a sample `mocks.json` that seeds two demo mocks at startup:
+The repo ships a sample `mocks.json` that seeds five demo mocks at startup:
 
 ```bash
 curl http://localhost:3000/health
@@ -99,12 +99,14 @@ Responds `201` with the stored mock including its server-assigned `id`.
 | `status` | no | Integer 100–599; defaults to `200` |
 | `headers` | no | Object of string → string; sent on every matched response |
 | `body` | no | Any JSON value; strings are served as `text/plain`, everything else as `application/json` (a registered `Content-Type` header wins) |
+| `bodySchema` | no | JSON Schema object applied to request bodies for this mock; failing bodies get `400` — see [Request body schemas](#request-body-schemas) |
+| `responseSchema` | no | JSON Schema the response body is **generated** from on every call; mutually exclusive with `body` — see [Response generation from JSON Schema](#response-generation-from-json-schema) |
 
-Invalid payloads get `400` with `error.details[]` naming the offending fields; nothing is registered. Registering the same `method` + `uri` again succeeds — the newer registration wins matching.
+Invalid payloads get `400` with `error.details[]` naming the offending fields; nothing is registered. An invalid `bodySchema` (not a JSON object, or not a compilable JSON Schema) or an invalid `responseSchema` (not a JSON object, or not a schema the generator accepts) is rejected the same way, as is a payload declaring both `body` and `responseSchema`. Registering the same `method` + `uri` again succeeds — the newer registration wins matching.
 
 #### List — `GET /_mocks`
 
-`200` with a JSON array of all mocks (`id`, `method`, `uri`, `status`, `headers`, `body`), oldest registration first.
+`200` with a JSON array of all mocks (`id`, `method`, `uri`, `status`, `headers`, `body`, and `bodySchema`/`responseSchema` when declared), oldest registration first.
 
 #### Delete one — `DELETE /_mocks/{id}`
 
@@ -140,7 +142,7 @@ Statistics live **in memory only**: they start empty at every startup and are lo
 
 `204`; empties the journal so counting restarts at zero. Registered mocks are unaffected. Useful between test steps: reset, exercise the system, read the report.
 
-Other admin API behavior: unsupported methods on these routes (e.g. `PUT /_mocks`, `GET /_mocks/{id}`) return `405`; unmapped subpaths (e.g. `/_mocks/a/b`) return the JSON `404`; the `/_mocks` prefix can never be served by a mock.
+Other admin API behavior: unsupported methods on these routes (e.g. `PUT /_mocks`, `GET /_mocks/{id}`) return `405`; unmapped subpaths (e.g. `/_mocks/a/b`) return the JSON `500`; the `/_mocks` prefix can never be served by a mock.
 
 ### At startup — `mocks.json`
 
@@ -155,7 +157,19 @@ A JSON array loaded when the server starts:
     "headers": { "X-Mock": "seeded" },
     "body": { "status": "ok" }
   },
-  { "method": "GET", "uri": "/users/:id", "body": { "name": "Demo User" } }
+  { "method": "GET", "uri": "/users/:id", "body": { "name": "Demo User" } },
+  {
+    "method": "POST",
+    "uri": "/orders",
+    "status": 201,
+    "body": { "ok": true },
+    "bodySchema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } }
+  },
+  {
+    "method": "GET",
+    "uri": "/random-user",
+    "responseSchema": { "type": "object", "required": ["id", "name"], "properties": { "id": { "type": "integer" }, "name": { "type": "string" } } }
+  }
 ]
 ```
 
@@ -170,13 +184,79 @@ A JSON array loaded when the server starts:
 - Entry order matters: with two entries for the same method + URI, the later one wins.
 - Seeding only fills an **empty** store: entries are inserted on a fresh database (first run) or on a restart after clear-all. When the store already holds mocks, the file is still validated — an invalid file still stops the server — but nothing is inserted, so persisted state (including individual deletes of seeded mocks) survives restarts.
 - Seeded mocks behave exactly like runtime ones: they appear in `GET /_mocks` with ids and can be deleted or cleared.
+- Entries may declare `bodySchema` or `responseSchema` exactly like admin API registrations — seeded mocks enforce request body schemas and generate response bodies the same way, and an invalid schema (or a `body` + `responseSchema` combination) in the file stops the server like any other invalid entry.
+
+### Request body schemas
+
+A mock may declare an optional `bodySchema` — a JSON Schema (draft 2020-12) object describing the request bodies it accepts. Matching still selects the single winner by method + URI precedence; the winner's `bodySchema` then validates the request body, and a failing schema never falls through to a lower-precedence mock.
+
+```bash
+curl -X POST http://localhost:3000/_mocks \
+  -H 'content-type: application/json' \
+  -d '{"method": "POST", "uri": "/orders", "status": 201, "body": {"ok": true}, "bodySchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}}'
+
+curl -X POST http://localhost:3000/orders -d '{"name": 42}'   # 400
+curl -X POST http://localhost:3000/orders -d '{"name": "widget"}'   # 201 {"ok": true}
+```
+
+- On validation failure the response is `400` with a JSON error listing every violation; `field` carries the JSON Schema instance path (empty string for the root):
+
+  ```json
+  {
+    "error": {
+      "message": "request body failed bodySchema validation",
+      "method": "POST",
+      "path": "/orders",
+      "details": [{ "field": "/name", "message": "must be string" }]
+    }
+  }
+  ```
+
+- On success the registered response is served exactly as without a schema.
+- An absent, empty, or non-JSON request body fails validation the same way (`400`) — a mock with `bodySchema` always expects a JSON body.
+- Mocks **without** `bodySchema` never read the request body: existing mocks and traffic behave exactly as before.
+- Schema-rejected calls still count in the call statistics as matched calls under the registered pattern.
+- Schemas are self-contained: local `$ref` works, remote (HTTP) `$ref` resolution does not.
+
+### Response generation from JSON Schema
+
+A mock may declare an optional `responseSchema` — a JSON Schema describing the response body. Instead of a canned `body`, every matching call serves **freshly generated** fake data conforming to the schema:
+
+```bash
+curl -X POST http://localhost:3000/_mocks \
+  -H 'content-type: application/json' \
+  -d '{"method": "GET", "uri": "/users/:id", "responseSchema": {"type": "object", "required": ["id", "name"], "properties": {"id": {"type": "integer"}, "name": {"type": "string"}, "email": {"type": "string", "format": "email"}}}}'
+
+curl http://localhost:3000/users/42   # {"id":254,"name":"aG88rL","email":"..."}
+curl http://localhost:3000/users/42   # {"id":469,"name":"rH2xY","email":"..."} — different every call
+```
+
+- Each call generates independently — no seeding or caching knobs; tests must assert on shape (types, required fields), not on exact values.
+- The mock's registered `status` and `headers` apply to generated responses; generated bodies are always JSON (`Content-Type: application/json` unless a registered header overrides). `HEAD` responses and null-body statuses (e.g. `204`) carry no body, as usual.
+- `body` and `responseSchema` are mutually exclusive: a registration declaring both is rejected (`400` / config startup failure). `bodySchema` and `responseSchema` **do** combine: the request body is validated first (`400` on failure), then the response is generated.
+- Supported drafts: JSON Schema 2019-09 and 2020-12 (a draft-04 `$schema` declaration is rejected at registration). Built-in `format` generators include `date-time`, `email`, `uri`, `uuid`, `ipv4`/`ipv6`; `pattern`, `enum`, `const`, `minimum`/`maximum`, `minItems`/`maxItems` etc. are honored.
+- Optional properties appear with ~50% probability per call, and recursive `$ref` schemas are generated up to a depth limit — generated bodies vary in shape between calls by design.
+- Invalid or unsatisfiable schemas are rejected at registration time via a trial generation, so a stored `responseSchema` always generates.
+
+**Combining both features** — the shipped sample config seeds `POST /shipments` with a `bodySchema` (request contract: nested address, non-empty items array) *and* a `responseSchema` (generated receipt: uuid, enum status, date-time eta). The request body is validated first, then the response is generated:
+
+```bash
+curl -X POST http://localhost:3000/shipments -d '{"items": []}'
+# 400 — details: /address "must have required property 'address'", /items "must NOT have fewer than 1 items"
+
+curl -X POST http://localhost:3000/shipments \
+  -d '{"address": {"city": "Warsaw", "zip": "00001"}, "items": [{"sku": "A-1", "qty": 2}]}'
+# 201 — generated receipt, fresh every call, e.g.
+# {"id":"0e1a...-uuid","status":"accepted","eta":"2026-09-26T17:03:12.345Z","courier":"xH2k"}
+# ("courier" is optional in the schema, so it appears on roughly half the calls)
+```
 
 ## Matching & precedence
 
 - Matching is by exact HTTP method — strict, so a `HEAD` request only matches a `HEAD` mock (HEAD responses carry status and headers, never a body) — and by URI path. Query strings are ignored; a trailing slash is ignored (`/users` ≡ `/users/`).
 - URI patterns: exact segments, `:param` (any single segment), and `*` (one or more remaining segments; only allowed as the final segment).
 - When several mocks match one request, exactly one wins: **exact > `:param` > `*`**, compared segment by segment; identical patterns → the most recently registered mock wins.
-- Unmatched requests get `404` with a JSON body naming method and path:
+- Unmatched requests get `500` with a JSON body naming method and path:
 
   ```json
   { "error": { "message": "no mock matches this request", "method": "GET", "path": "/unknown" } }
@@ -190,4 +270,4 @@ npm run build        # production build
 npm run smoke        # E2E lifecycle check; requires a server on MOCK_BASE (default http://127.0.0.1:3100)
 ```
 
-Layout: `lib/` holds the framework-agnostic core (matcher, SQLite-backed store, shared validation, config loader, response assembly, in-memory call-statistics journal); `app/%5Fmocks/` is the admin API (Next.js requires the `%5F` folder escape to serve the literal `/_mocks` URL); `app/[[...slug]]/route.ts` is the catch-all mock handler; `instrumentation.ts` seeds the config at startup when the store is empty; `scripts/` holds the prestart config gate (`check-mocks.ts`, wired via `predev`/`prestart`) and the smoke test.
+Layout: `lib/` holds the framework-agnostic core (matcher, SQLite-backed store, shared validation, request-body schema validation, schema-driven response generation, config loader, response assembly, in-memory call-statistics journal); `app/%5Fmocks/` is the admin API (Next.js requires the `%5F` folder escape to serve the literal `/_mocks` URL); `app/[[...slug]]/route.ts` is the catch-all mock handler; `instrumentation.ts` seeds the config at startup when the store is empty; `scripts/` holds the prestart config gate (`check-mocks.ts`, wired via `predev`/`prestart`) and the smoke test.
