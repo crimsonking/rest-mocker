@@ -12,7 +12,7 @@ export class ConfigError extends Error {
 
 /** MOCK_CONFIG_FILE env override (relative paths resolve against cwd), default ./mocks.json. */
 export function resolveConfigPath(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
   cwd: string = process.cwd(),
 ): string {
   const fromEnv = env.MOCK_CONFIG_FILE;

@@ -19,7 +19,7 @@ export interface MockRoute {
 
 /** MOCK_DB_FILE env override (relative paths resolve against cwd), default ./mocks.db (design D12). */
 export function resolveDbPath(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
   cwd: string = process.cwd(),
 ): string {
   const fromEnv = env.MOCK_DB_FILE;

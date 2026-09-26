@@ -33,7 +33,7 @@ export const UNKNOWN_CALLER = 'unknown';
 const HEADER_TOKEN = /^[!#$%&'*+\-.^_|~0-9A-Za-z]+$/;
 
 /** MOCK_STATS_CALLER_HEADER env override, default user-agent (design D17). */
-export function resolveCallerHeader(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveCallerHeader(env: Record<string, string | undefined> = process.env): string {
   const name = env.MOCK_STATS_CALLER_HEADER;
   return name !== undefined && HEADER_TOKEN.test(name) ? name : DEFAULT_CALLER_HEADER;
 }
