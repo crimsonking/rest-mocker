@@ -126,6 +126,79 @@ async function main() {
   eq('malformed json 400', (await fetch(`${BASE}/_mocks`, { method: 'POST', body: '{not json' })).status, 400);
   eq('store unchanged after rejections', (await req('GET', '/_mocks')).json.length, countBefore);
 
+  // Schema features: bodySchema enforcement over HTTP.
+  await register({
+    method: 'POST',
+    uri: '/sm-orders',
+    status: 201,
+    body: { ok: true },
+    bodySchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+  });
+  const ordersCount = (await req('GET', '/_mocks')).json.length;
+  r = await req('POST', '/sm-orders', { name: 42 });
+  eq('bodySchema bad body 400', r.status, 400);
+  eq('bodySchema details name the instance path', r.json?.error?.details?.[0]?.field, '/name');
+  eq('bodySchema absent body 400', (await req('POST', '/sm-orders')).status, 400);
+  eq('failed body calls register nothing', (await req('GET', '/_mocks')).json.length, ordersCount);
+  r = await req('POST', '/sm-orders', { name: 'widget' });
+  eq('bodySchema good body 201', r.status, 201);
+  eq('bodySchema good body serves the canned response', r.json, { ok: true });
+
+  // Schema features: responseSchema generation over HTTP.
+  await register({
+    method: 'GET',
+    uri: '/sm-gen',
+    responseSchema: {
+      type: 'object',
+      required: ['id', 'name'],
+      properties: { id: { type: 'integer' }, name: { type: 'string' } },
+    },
+  });
+  const gen1 = await req('GET', '/sm-gen');
+  const gen2 = await req('GET', '/sm-gen');
+  eq('responseSchema first call 200', gen1.status, 200);
+  eq('responseSchema second call 200', gen2.status, 200);
+  check(
+    'responseSchema serves application/json',
+    (gen1.headers.get('content-type') ?? '').startsWith('application/json'),
+    gen1.headers.get('content-type'),
+  );
+  check(
+    'responseSchema bodies conform on both calls',
+    Number.isInteger(gen1.json?.id) &&
+      typeof gen1.json?.name === 'string' &&
+      Number.isInteger(gen2.json?.id) &&
+      typeof gen2.json?.name === 'string',
+    `${gen1.text} / ${gen2.text}`,
+  );
+  check('responseSchema generates fresh data per call', gen1.text !== gen2.text, `${gen1.text} vs ${gen2.text}`);
+
+  // Schema registration rejections change nothing.
+  const schemaCountBefore = (await req('GET', '/_mocks')).json.length;
+  r = await req('POST', '/_mocks', { method: 'POST', uri: '/sm-bad', bodySchema: { type: 'nope' } });
+  eq('invalid bodySchema 400', r.status, 400);
+  check('invalid bodySchema names the field', JSON.stringify(r.json).includes('"bodySchema"'), r.text);
+  r = await req('POST', '/_mocks', { method: 'GET', uri: '/sm-bad', responseSchema: { type: 'nope' } });
+  eq('invalid responseSchema 400', r.status, 400);
+  check(
+    'invalid responseSchema names the field',
+    JSON.stringify(r.json).includes('"responseSchema"'),
+    r.text,
+  );
+  r = await req('POST', '/_mocks', {
+    method: 'GET',
+    uri: '/sm-bad',
+    body: { a: 1 },
+    responseSchema: { type: 'object' },
+  });
+  eq('body+responseSchema conflict 400', r.status, 400);
+  check(
+    'conflict error names both fields',
+    /cannot be combined/.test(r.json?.error?.details?.[0]?.message ?? ''),
+    r.text,
+  );
+  eq('store unchanged after schema rejections', (await req('GET', '/_mocks')).json.length, schemaCountBefore);
+
   // Reserved prefix: admin API owns it; catch-all never serves mocks there.
   check('GET /_mocks is the admin list', Array.isArray((await req('GET', '/_mocks')).json));
   eq('unknown /_mocks subpath 500', (await req('GET', '/_mocks/a/b')).status, 500);
