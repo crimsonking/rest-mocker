@@ -1,85 +1,88 @@
-[
-  {
-    "method": "GET",
-    "uri": "/health",
-    "status": 200,
-    "headers": { "X-Mock": "seeded" },
-    "body": { "status": "ok" }
-  },
-  {
-    "method": "GET",
-    "uri": "/users/:id",
-    "status": 200,
-    "body": { "name": "Demo User", "active": true }
-  },
-  {
-    "method": "POST",
-    "uri": "/orders",
-    "status": 201,
-    "body": { "ok": true },
-    "bodySchema": {
-      "type": "object",
-      "required": ["name"],
-      "properties": {
-        "name": { "type": "string" },
-        "quantity": { "type": "integer", "minimum": 1 }
-      }
-    }
-  },
-  {
-    "method": "GET",
-    "uri": "/random-user",
-    "status": 200,
-    "responseSchema": {
-      "type": "object",
-      "required": ["id", "name"],
-      "properties": {
-        "id": { "type": "integer" },
-        "name": { "type": "string" },
-        "email": { "type": "string", "format": "email" }
-      }
-    }
-  },
-  {
-    "method": "POST",
-    "uri": "/shipments",
-    "status": 201,
-    "bodySchema": {
-      "type": "object",
-      "required": ["address", "items"],
-      "properties": {
-        "address": {
-          "type": "object",
-          "required": ["city"],
-          "properties": {
-            "city": { "type": "string" },
-            "zip": { "type": "string", "pattern": "^[0-9]{5}$" }
-          }
-        },
-        "items": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": ["sku"],
-            "properties": {
-              "sku": { "type": "string" },
-              "qty": { "type": "integer", "minimum": 1 }
-            }
-          }
-        },
-        "express": { "type": "boolean" }
+{
+  "$schema": "./mocks.schema.json",
+  "mocks": [
+    {
+      "method": "GET",
+      "uri": "/health",
+      "status": 200,
+      "headers": { "X-Mock": "seeded" },
+      "body": { "status": "ok" }
+    },
+    {
+      "method": "GET",
+      "uri": "/users/:id",
+      "status": 200,
+      "body": { "name": "Demo User", "active": true }
+    },
+    {
+      "method": "POST",
+      "uri": "/orders",
+      "status": 201,
+      "body": { "ok": true },
+      "bodySchema": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "quantity": { "type": "integer", "minimum": 1 }
+        }
       }
     },
-    "responseSchema": {
-      "type": "object",
-      "required": ["id", "status", "eta"],
-      "properties": {
-        "id": { "type": "string", "format": "uuid" },
-        "status": { "enum": ["accepted", "pending"] },
-        "eta": { "type": "string", "format": "date-time" },
-        "courier": { "type": "string" }
+    {
+      "method": "GET",
+      "uri": "/random-user",
+      "status": 200,
+      "responseSchema": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" }
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "uri": "/shipments",
+      "status": 201,
+      "bodySchema": {
+        "type": "object",
+        "required": ["address", "items"],
+        "properties": {
+          "address": {
+            "type": "object",
+            "required": ["city"],
+            "properties": {
+              "city": { "type": "string" },
+              "zip": { "type": "string", "pattern": "^[0-9]{5}$" }
+            }
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["sku"],
+              "properties": {
+                "sku": { "type": "string" },
+                "qty": { "type": "integer", "minimum": 1 }
+              }
+            }
+          },
+          "express": { "type": "boolean" }
+        }
+      },
+      "responseSchema": {
+        "type": "object",
+        "required": ["id", "status", "eta"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "status": { "enum": ["accepted", "pending"] },
+          "eta": { "type": "string", "format": "date-time" },
+          "courier": { "type": "string" }
+        }
       }
     }
-  }
-]
+  ]
+}

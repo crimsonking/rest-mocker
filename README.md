@@ -51,7 +51,7 @@ One container per data volume — the store assumes a single owning process.
 
 ### Custom seed config
 
-The image ships the repo's sample `mocks.json` at `/app/mocks.json`, seeded on first run against an empty store. Mount your own file over it (read-only), or point `MOCK_CONFIG_FILE` elsewhere:
+The image ships the repo's sample `mocks.json` at `/app/mocks.json` (with its `mocks.schema.json` alongside), seeded on first run against an empty store. Mount your own file over it (read-only), or point `MOCK_CONFIG_FILE` elsewhere:
 
 ```bash
 docker run -d --name mock -p 3100:3000 -v ./my-mocks.json:/app/mocks.json:ro mock-e2e-server:latest
@@ -146,32 +146,37 @@ Other admin API behavior: unsupported methods on these routes (e.g. `PUT /_mocks
 
 ### At startup — `mocks.json`
 
-A JSON array loaded when the server starts:
+Loaded when the server starts. Two file forms are accepted — a bare JSON array of mock definitions, or an object wrapper carrying a `mocks` array. The wrapper form lets the file point editors at the published `mocks.schema.json` via `$schema` for autocomplete and inline errors (the key is editor-only: it is never fetched or resolved at runtime, and unknown wrapper keys fail startup):
 
 ```json
-[
-  {
-    "method": "GET",
-    "uri": "/health",
-    "status": 200,
-    "headers": { "X-Mock": "seeded" },
-    "body": { "status": "ok" }
-  },
-  { "method": "GET", "uri": "/users/:id", "body": { "name": "Demo User" } },
-  {
-    "method": "POST",
-    "uri": "/orders",
-    "status": 201,
-    "body": { "ok": true },
-    "bodySchema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } }
-  },
-  {
-    "method": "GET",
-    "uri": "/random-user",
-    "responseSchema": { "type": "object", "required": ["id", "name"], "properties": { "id": { "type": "integer" }, "name": { "type": "string" } } }
-  }
-]
+{
+  "$schema": "./mocks.schema.json",
+  "mocks": [
+    {
+      "method": "GET",
+      "uri": "/health",
+      "status": 200,
+      "headers": { "X-Mock": "seeded" },
+      "body": { "status": "ok" }
+    },
+    { "method": "GET", "uri": "/users/:id", "body": { "name": "Demo User" } },
+    {
+      "method": "POST",
+      "uri": "/orders",
+      "status": 201,
+      "body": { "ok": true },
+      "bodySchema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } }
+    },
+    {
+      "method": "GET",
+      "uri": "/random-user",
+      "responseSchema": { "type": "object", "required": ["id", "name"], "properties": { "id": { "type": "integer" }, "name": { "type": "string" } } }
+    }
+  ]
+}
 ```
+
+Both forms validate and seed identically; the bare-array form (`[ {…}, {…} ]`) remains fully valid. The runtime validator (`lib/validation.ts`) stays authoritative — `mocks.schema.json` steers authoring only.
 
 - Default location: `./mocks.json`. Override with the `MOCK_CONFIG_FILE` environment variable (relative paths resolve against the project root):
 
@@ -180,7 +185,7 @@ A JSON array loaded when the server starts:
   ```
 
 - A **missing** file is fine: the server starts with an empty store.
-- An **invalid** file (malformed JSON, not an array, bad entry) stops the server before it listens, with an error naming the file and the offending entry.
+- An **invalid** file (malformed JSON, neither an array nor a valid wrapper, bad entry) stops the server before it listens, with an error naming the file and the offending entry.
 - Entry order matters: with two entries for the same method + URI, the later one wins.
 - Seeding only fills an **empty** store: entries are inserted on a fresh database (first run) or on a restart after clear-all. When the store already holds mocks, the file is still validated — an invalid file still stops the server — but nothing is inserted, so persisted state (including individual deletes of seeded mocks) survives restarts.
 - Seeded mocks behave exactly like runtime ones: they appear in `GET /_mocks` with ids and can be deleted or cleared.
@@ -270,4 +275,4 @@ npm run build        # production build
 npm run smoke        # E2E lifecycle check; requires a server on MOCK_BASE (default http://127.0.0.1:3100)
 ```
 
-Layout: `lib/` holds the framework-agnostic core (matcher, SQLite-backed store, shared validation, request-body schema validation, schema-driven response generation, config loader, response assembly, in-memory call-statistics journal); `app/%5Fmocks/` is the admin API (Next.js requires the `%5F` folder escape to serve the literal `/_mocks` URL); `app/[[...slug]]/route.ts` is the catch-all mock handler; `instrumentation.ts` seeds the config at startup when the store is empty; `scripts/` holds the prestart config gate (`check-mocks.ts`, wired via `predev`/`prestart`) and the smoke test.
+Layout: `lib/` holds the framework-agnostic core (matcher, SQLite-backed store, shared validation, request-body schema validation, schema-driven response generation, config loader, response assembly, in-memory call-statistics journal); `app/%5Fmocks/` is the admin API (Next.js requires the `%5F` folder escape to serve the literal `/_mocks` URL); `app/[[...slug]]/route.ts` is the catch-all mock handler; `instrumentation.ts` seeds the config at startup when the store is empty; `mocks.schema.json` is the editor-facing JSON Schema for the config file (both forms; the runtime validator stays authoritative); `scripts/` holds the prestart config gate (`check-mocks.ts`, wired via `predev`/`prestart`) and the smoke test.

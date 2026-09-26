@@ -20,6 +20,39 @@ export function resolveConfigPath(
 }
 
 /**
+ * Config form fork (design D32/D33): a bare array of definitions, or a
+ * wrapper object with exactly `$schema` (optional string, never resolved at
+ * runtime — it exists for editor tooling) and `mocks` (required array).
+ * Anything else fails fast naming the file.
+ */
+function extractEntries(filePath: string, parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new ConfigError(
+      `Invalid mock config at ${filePath}: expected a JSON array of mock definitions or an object with a "mocks" array`,
+    );
+  }
+  const wrapper = parsed as Record<string, unknown>;
+  const unknownKeys = Object.keys(wrapper).filter((key) => key !== '$schema' && key !== 'mocks');
+  if (unknownKeys.length > 0) {
+    throw new ConfigError(
+      `Invalid mock config at ${filePath}: unknown wrapper key${
+        unknownKeys.length === 1 ? '' : 's'
+      } ${unknownKeys.join(', ')} — only "$schema" and "mocks" are allowed`,
+    );
+  }
+  if (wrapper.$schema !== undefined && typeof wrapper.$schema !== 'string') {
+    throw new ConfigError(`Invalid mock config at ${filePath}: "$schema" must be a string`);
+  }
+  if (!Array.isArray(wrapper.mocks)) {
+    throw new ConfigError(
+      `Invalid mock config at ${filePath}: "mocks" must be a JSON array of mock definitions`,
+    );
+  }
+  return wrapper.mocks;
+}
+
+/**
  * Reads and validates a config file into ordered mock definitions.
  * A missing file yields an empty list; anything invalid throws a
  * ConfigError naming the file path and, for bad entries, the entry index.
@@ -35,12 +68,7 @@ export function readConfigEntries(filePath: string): MockDefinition[] {
       `Invalid mock config at ${filePath}: ${err instanceof Error ? err.message : 'malformed JSON'}`,
     );
   }
-  if (!Array.isArray(parsed)) {
-    throw new ConfigError(
-      `Invalid mock config at ${filePath}: expected a JSON array of mock definitions`,
-    );
-  }
-  return parsed.map((entry, index) => {
+  return extractEntries(filePath, parsed).map((entry, index) => {
     const result = validateMockDefinition(entry);
     if (!result.ok) {
       const problems = result.errors.map((e) => `${e.field}: ${e.message}`).join('; ');

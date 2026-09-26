@@ -19,6 +19,8 @@ COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 # Sample seed config; mount a custom file over it or point MOCK_CONFIG_FILE elsewhere.
 COPY --from=build /app/mocks.json ./mocks.json
+# Editor-facing schema referenced by the sample config's "$schema" key; never read at runtime.
+COPY --from=build /app/mocks.schema.json ./mocks.schema.json
 RUN mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 3000

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Editor-facing schema for the mock-e2e-server config file (mocks.json / MOCK_CONFIG_FILE). The runtime validation authority is validateMockDefinition in lib/validation.ts - this file steers authoring only and is deliberately looser where precision buys nothing in an editor (e.g. no wildcard-position rule for uri). Update both when mock fields change.",
+  "title": "mock-e2e-server mock configuration",
+  "description": "Either a bare array of mock definitions, or an object wrapper { \"$schema\": ..., \"mocks\": [...] } so the file can self-reference this schema for editor autocomplete.",
+  "oneOf": [
+    { "$ref": "#/$defs/entryArray" },
+    { "$ref": "#/$defs/wrapper" }
+  ],
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "description": "One mock definition.",
+      "required": ["method", "uri"],
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "description": "HTTP method (the runtime also accepts lowercase).",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+        },
+        "uri": {
+          "description": "Path starting with \"/\"; may contain :param segments and a final * wildcard; must not target /_mocks.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "status": {
+          "description": "Response status code; defaults to 200.",
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "headers": {
+          "description": "Response headers sent on every matched response.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "description": "Static response body: any JSON value. Strings are served as text/plain, everything else as application/json. Mutually exclusive with responseSchema."
+        },
+        "bodySchema": {
+          "description": "JSON Schema applied to request bodies for this mock; failing bodies get 400 with per-violation details. The runtime rejects schemas it cannot compile.",
+          "type": "object"
+        },
+        "responseSchema": {
+          "description": "JSON Schema (2019-09/2020-12) the response body is generated from on every call. Mutually exclusive with body.",
+          "type": "object"
+        }
+      },
+      "not": { "required": ["body", "responseSchema"] }
+    },
+    "entryArray": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "wrapper": {
+      "type": "object",
+      "required": ["mocks"],
+      "additionalProperties": false,
+      "properties": {
+        "$schema": {
+          "description": "Optional pointer to this schema for editor tooling; never resolved at runtime.",
+          "type": "string"
+        },
+        "mocks": { "$ref": "#/$defs/entryArray" }
+      }
+    }
+  }
+}

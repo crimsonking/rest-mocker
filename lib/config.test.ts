@@ -59,9 +59,13 @@ describe('readConfigEntries', () => {
     }
   });
 
-  it('throws when the top-level value is not an array', () => {
-    const file = configFile('obj.json', JSON.stringify({ method: 'GET', uri: '/x' }));
-    expect(() => readConfigEntries(file)).toThrowError(/expected a JSON array/);
+  it('throws when the top-level value is neither an array nor a wrapper', () => {
+    const scalar = configFile('scalar.json', JSON.stringify('nope'));
+    expect(() => readConfigEntries(scalar)).toThrowError(/expected a JSON array/);
+    // A bare mock definition (array brackets forgotten) lands in the wrapper
+    // branch and is reported by its unknown keys.
+    const bareDef = configFile('obj.json', JSON.stringify({ method: 'GET', uri: '/x' }));
+    expect(() => readConfigEntries(bareDef)).toThrowError(/unknown wrapper key/);
   });
 
   it('throws naming the file and the offending entry index', () => {
@@ -136,6 +140,71 @@ describe('readConfigEntries', () => {
     expect(() => readConfigEntries(file)).toThrowError(/bodySchema/);
   });
 
+  it('loads a wrapper-form config identically to the array form', () => {
+    const entries = [
+      { method: 'get', uri: '/health', body: 'ok' },
+      { method: 'POST', uri: '/echo', status: 201, body: { a: 1 } },
+    ];
+    const arrayFile = configFile('form-array.json', JSON.stringify(entries));
+    const wrapperFile = configFile(
+      'form-wrapper.json',
+      JSON.stringify({ $schema: './mocks.schema.json', mocks: entries }),
+    );
+    expect(readConfigEntries(wrapperFile)).toEqual(readConfigEntries(arrayFile));
+  });
+
+  it('throws naming the file and key for an unknown wrapper key', () => {
+    const file = configFile('wrapper-unknown-key.json', JSON.stringify({ mocks: [], mock: [] }));
+    try {
+      readConfigEntries(file);
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const message = (err as Error).message;
+      expect(message).toContain(file);
+      expect(message).toContain('mock');
+    }
+  });
+
+  it('throws for a wrapper whose mocks is not an array', () => {
+    const file = configFile('wrapper-bad-mocks.json', JSON.stringify({ mocks: 'nope' }));
+    expect(() => readConfigEntries(file)).toThrowError(/"mocks" must be a JSON array/);
+  });
+
+  it('throws for a wrapper whose $schema is not a string', () => {
+    const file = configFile('wrapper-bad-schema-key.json', JSON.stringify({ $schema: 42, mocks: [] }));
+    expect(() => readConfigEntries(file)).toThrowError(/"\$schema" must be a string/);
+  });
+
+  it('never resolves $schema at runtime: an unreachable path loads fine', () => {
+    const file = configFile(
+      'wrapper-unreachable-schema.json',
+      JSON.stringify({
+        $schema: 'https://nonexistent.invalid/definitely-not-here.json',
+        mocks: [{ method: 'GET', uri: '/x' }],
+      }),
+    );
+    expect(readConfigEntries(file)).toEqual([{ method: 'GET', uri: '/x' }]);
+  });
+
+  it('throws naming the file and entry index for an invalid entry inside a wrapper', () => {
+    const file = configFile(
+      'wrapper-invalid-entry.json',
+      JSON.stringify({
+        mocks: [{ method: 'GET', uri: '/a' }, { method: 'FETCH', uri: '/b' }],
+      }),
+    );
+    try {
+      readConfigEntries(file);
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      const message = (err as Error).message;
+      expect(message).toContain(file);
+      expect(message).toContain('entry 1');
+      expect(message).toContain('method');
+    }
+  });
+
   it('loads an entry with a valid responseSchema intact', () => {
     const responseSchema = {
       type: 'object',
@@ -194,6 +263,24 @@ describe('seedStoreFromFile', () => {
         { method: 'GET', uri: '/first', body: 'one' },
         { method: 'GET', uri: '/second', body: 'two' },
       ]),
+    );
+    const store = new MockStore(':memory:');
+    const result = seedStoreFromFile(file, store);
+    expect(result).toEqual({ path: file, seeded: 2, skipped: 0 });
+    expect(store.list().map((r) => r.uri)).toEqual(['/first', '/second']);
+    expect(store.list().map((r) => r.body)).toEqual(['one', 'two']);
+  });
+
+  it('seeds a wrapper-form file in file order, identically to the array form', () => {
+    const file = configFile(
+      'seed-wrapper.json',
+      JSON.stringify({
+        $schema: './mocks.schema.json',
+        mocks: [
+          { method: 'GET', uri: '/first', body: 'one' },
+          { method: 'GET', uri: '/second', body: 'two' },
+        ],
+      }),
     );
     const store = new MockStore(':memory:');
     const result = seedStoreFromFile(file, store);
