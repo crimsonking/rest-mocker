@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { adminErrorResponse, buildMockResponse, toMockJson, unmatchedResponse } from './response.ts';
+import {
+  adminErrorResponse,
+  bodySchemaRejectionResponse,
+  buildMockResponse,
+  toMockJson,
+  unmatchedResponse,
+} from './response.ts';
 import type { MockRoute } from './store.ts';
 
 function route(overrides: Partial<MockRoute> = {}): MockRoute {
@@ -64,9 +70,9 @@ describe('buildMockResponse', () => {
 });
 
 describe('unmatchedResponse', () => {
-  it('is a 404 JSON payload naming method and path', async () => {
+  it('is a 500 JSON payload naming method and path', async () => {
     const res = unmatchedResponse('GET', '/unknown');
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(500);
     expect(res.headers.get('content-type')).toBe('application/json');
     const payload = (await res.json()) as { error: { message: string; method: string; path: string } };
     expect(payload.error.method).toBe('GET');
@@ -88,6 +94,21 @@ describe('adminErrorResponse', () => {
   });
 });
 
+describe('bodySchemaRejectionResponse', () => {
+  it('is a 400 JSON payload naming method, path, and per-violation details', async () => {
+    const details = [{ field: '/name', message: 'must be string' }];
+    const res = bodySchemaRejectionResponse('POST', '/orders', details);
+    expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toBe('application/json');
+    const payload = (await res.json()) as {
+      error: { message: string; method: string; path: string; details: typeof details };
+    };
+    expect(payload.error.method).toBe('POST');
+    expect(payload.error.path).toBe('/orders');
+    expect(payload.error.details).toEqual(details);
+  });
+});
+
 describe('toMockJson', () => {
   it('projects public fields and keeps body values lossless', () => {
     const body = { list: [1, { nested: null }] };
@@ -105,5 +126,21 @@ describe('toMockJson', () => {
 
   it('omits the body key when none was registered', () => {
     expect('body' in toMockJson(route())).toBe(false);
+  });
+
+  it('projects bodySchema losslessly when declared and omits it otherwise', () => {
+    const bodySchema = { type: 'object', required: ['name'] };
+    const json = toMockJson(route({ bodySchema }));
+    expect(json.bodySchema).toEqual(bodySchema);
+    expect(json).not.toHaveProperty('seq');
+    expect('bodySchema' in toMockJson(route())).toBe(false);
+  });
+
+  it('projects responseSchema losslessly when declared and omits it otherwise', () => {
+    const responseSchema = { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } };
+    const json = toMockJson(route({ responseSchema }));
+    expect(json.responseSchema).toEqual(responseSchema);
+    expect(json).not.toHaveProperty('seq');
+    expect('responseSchema' in toMockJson(route())).toBe(false);
   });
 });

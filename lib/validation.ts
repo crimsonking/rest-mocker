@@ -1,3 +1,5 @@
+import { generateFromSchema } from './body-gen.ts';
+import { compileBodySchema } from './body-schema.ts';
 import { HTTP_METHODS, RESERVED_PREFIX, type HttpMethod, type Json } from './types.ts';
 
 export interface MockDefinition {
@@ -6,6 +8,8 @@ export interface MockDefinition {
   status?: number;
   headers?: Record<string, string>;
   body?: Json;
+  bodySchema?: Json;
+  responseSchema?: Json;
 }
 
 export interface ValidationError {
@@ -130,6 +134,48 @@ export function validateMockDefinition(input: unknown): ValidationResult {
     }
   }
 
+  let bodySchema: Json | undefined;
+  if (raw.bodySchema !== undefined) {
+    const problem = compileBodySchema(raw.bodySchema);
+    if (problem !== null) {
+      errors.push({ field: 'bodySchema', message: problem });
+    } else {
+      bodySchema = raw.bodySchema as Json;
+    }
+  }
+
+  let responseSchema: Json | undefined;
+  if (raw.responseSchema !== undefined) {
+    if (
+      typeof raw.responseSchema !== 'object' ||
+      raw.responseSchema === null ||
+      Array.isArray(raw.responseSchema)
+    ) {
+      errors.push({ field: 'responseSchema', message: 'responseSchema must be a JSON object' });
+    } else {
+      // Trial generation is the validity check (design D28): an invalid or
+      // unsatisfiable schema throws here, never at request time.
+      try {
+        generateFromSchema(raw.responseSchema as Json);
+        responseSchema = raw.responseSchema as Json;
+      } catch (err) {
+        errors.push({
+          field: 'responseSchema',
+          message: `responseSchema is not a valid JSON Schema: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        });
+      }
+    }
+  }
+
+  if (raw.body !== undefined && raw.responseSchema !== undefined) {
+    errors.push({
+      field: 'responseSchema',
+      message: 'body and responseSchema cannot be combined: serve a static body or a generated one',
+    });
+  }
+
   if (errors.length > 0) return { ok: false, errors };
   const value: MockDefinition = {
     method: method as HttpMethod,
@@ -138,5 +184,7 @@ export function validateMockDefinition(input: unknown): ValidationResult {
   if (status !== undefined) value.status = status;
   if (headers !== undefined) value.headers = headers;
   if (body !== undefined) value.body = body;
+  if (bodySchema !== undefined) value.bodySchema = bodySchema;
+  if (responseSchema !== undefined) value.responseSchema = responseSchema;
   return { ok: true, value };
 }

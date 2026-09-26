@@ -11,6 +11,8 @@ export interface MockRoute {
   status: number;
   headers: Record<string, string>;
   body?: Json;
+  bodySchema?: Json;
+  responseSchema?: Json;
   /** Monotonic registration counter: precedence tie-break and list ordering. */
   seq: number;
 }
@@ -34,8 +36,14 @@ const SCHEMA_SQL = `CREATE TABLE IF NOT EXISTS mocks (
   status INTEGER NOT NULL,
   headers TEXT NOT NULL,
   body TEXT NULL,
+  body_schema TEXT NULL,
+  response_schema TEXT NULL,
   seq INTEGER NOT NULL UNIQUE
 )`;
+
+// Columns added by migrations after the original table shape; each is
+// backfilled with ALTER TABLE on older databases (design D25/D30).
+const MIGRATED_COLUMNS = ['body_schema', 'response_schema'] as const;
 
 // Type alias, not interface: only a type literal carries the implicit index
 // signature that makes the cast from node:sqlite's Record<string, SQLOutputValue>
@@ -47,6 +55,8 @@ type MockRow = {
   status: number;
   headers: string;
   body: string | null;
+  body_schema: string | null;
+  response_schema: string | null;
   seq: number;
 };
 
@@ -77,6 +87,15 @@ export class MockStore {
     try {
       db.exec('PRAGMA busy_timeout = 5000');
       db.exec(SCHEMA_SQL);
+      // In-place migration for databases created before later columns existed
+      // (design D25/D30): additive columns, idempotent, single owning process.
+      const columns = db.prepare('PRAGMA table_info(mocks)').all() as { name: string }[];
+      const present = new Set(columns.map((column) => column.name));
+      for (const column of MIGRATED_COLUMNS) {
+        if (!present.has(column)) {
+          db.exec(`ALTER TABLE mocks ADD COLUMN ${column} TEXT NULL`);
+        }
+      }
       const row = db
         .prepare('SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM mocks')
         .get() as { maxSeq: number } | undefined;
@@ -99,11 +118,13 @@ export class MockStore {
       status: def.status ?? 200,
       headers: { ...def.headers },
       ...(def.body !== undefined ? { body: def.body } : {}),
+      ...(def.bodySchema !== undefined ? { bodySchema: def.bodySchema } : {}),
+      ...(def.responseSchema !== undefined ? { responseSchema: def.responseSchema } : {}),
       seq: ++this.counter,
     };
     this.db
       .prepare(
-        'INSERT INTO mocks (id, method, uri, status, headers, body, seq) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO mocks (id, method, uri, status, headers, body, body_schema, response_schema, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(
         route.id,
@@ -112,6 +133,8 @@ export class MockStore {
         route.status,
         JSON.stringify(route.headers),
         route.body === undefined ? null : JSON.stringify(route.body),
+        route.bodySchema === undefined ? null : JSON.stringify(route.bodySchema),
+        route.responseSchema === undefined ? null : JSON.stringify(route.responseSchema),
         route.seq,
       );
     return route;
@@ -120,7 +143,9 @@ export class MockStore {
   /** All mocks, oldest registration first. */
   list(): MockRoute[] {
     const rows = this.db
-      .prepare('SELECT id, method, uri, status, headers, body, seq FROM mocks ORDER BY seq')
+      .prepare(
+        'SELECT id, method, uri, status, headers, body, body_schema, response_schema, seq FROM mocks ORDER BY seq',
+      )
       .all() as MockRow[];
     return rows.map((row) => {
       const route: MockRoute = {
@@ -132,6 +157,8 @@ export class MockStore {
         seq: row.seq,
       };
       if (row.body !== null) route.body = JSON.parse(row.body) as Json;
+      if (row.body_schema !== null) route.bodySchema = JSON.parse(row.body_schema) as Json;
+      if (row.response_schema !== null) route.responseSchema = JSON.parse(row.response_schema) as Json;
       return route;
     });
   }

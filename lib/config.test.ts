@@ -88,6 +88,102 @@ describe('readConfigEntries', () => {
     const file = configFile('reserved.json', JSON.stringify([{ method: 'GET', uri: '/_mocks/x' }]));
     expect(() => readConfigEntries(file)).toThrowError(/reserved/);
   });
+
+  it('loads an entry with a valid bodySchema intact', () => {
+    const bodySchema = {
+      type: 'object',
+      required: ['name'],
+      properties: { name: { type: 'string' } },
+    };
+    const file = configFile(
+      'schema.json',
+      JSON.stringify([{ method: 'POST', uri: '/orders', body: { ok: true }, bodySchema }]),
+    );
+    expect(readConfigEntries(file)).toEqual([
+      { method: 'POST', uri: '/orders', body: { ok: true }, bodySchema },
+    ]);
+
+    const store = new MockStore(':memory:');
+    expect(seedStoreFromFile(file, store)).toEqual({ path: file, seeded: 1, skipped: 0 });
+    expect(store.list()[0].bodySchema).toEqual(bodySchema);
+  });
+
+  it('throws naming the file and entry index for an invalid bodySchema', () => {
+    const file = configFile(
+      'bad-schema.json',
+      JSON.stringify([
+        { method: 'GET', uri: '/a' },
+        { method: 'POST', uri: '/b', bodySchema: { type: 'nope' } },
+      ]),
+    );
+    try {
+      readConfigEntries(file);
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const message = (err as Error).message;
+      expect(message).toContain(file);
+      expect(message).toContain('entry 1');
+      expect(message).toContain('bodySchema');
+    }
+  });
+
+  it('throws for a bodySchema that is not a JSON object', () => {
+    const file = configFile(
+      'schema-not-object.json',
+      JSON.stringify([{ method: 'POST', uri: '/b', bodySchema: 'nope' }]),
+    );
+    expect(() => readConfigEntries(file)).toThrowError(/bodySchema/);
+  });
+
+  it('loads an entry with a valid responseSchema intact', () => {
+    const responseSchema = {
+      type: 'object',
+      required: ['id'],
+      properties: { id: { type: 'integer' } },
+    };
+    const file = configFile(
+      'response-schema.json',
+      JSON.stringify([{ method: 'GET', uri: '/users/:id', responseSchema }]),
+    );
+    expect(readConfigEntries(file)).toEqual([
+      { method: 'GET', uri: '/users/:id', responseSchema },
+    ]);
+
+    const store = new MockStore(':memory:');
+    expect(seedStoreFromFile(file, store)).toEqual({ path: file, seeded: 1, skipped: 0 });
+    expect(store.list()[0].responseSchema).toEqual(responseSchema);
+  });
+
+  it('throws naming the file and entry index for an invalid responseSchema', () => {
+    const file = configFile(
+      'bad-response-schema.json',
+      JSON.stringify([
+        { method: 'GET', uri: '/a' },
+        { method: 'GET', uri: '/b', responseSchema: { type: 'nope' } },
+      ]),
+    );
+    try {
+      readConfigEntries(file);
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigError);
+      const message = (err as Error).message;
+      expect(message).toContain(file);
+      expect(message).toContain('entry 1');
+      expect(message).toContain('responseSchema');
+    }
+  });
+
+  it('throws for an entry combining body and responseSchema', () => {
+    const file = configFile(
+      'conflict.json',
+      JSON.stringify([
+        { method: 'GET', uri: '/x', body: { static: true }, responseSchema: { type: 'object' } },
+      ]),
+    );
+    expect(() => readConfigEntries(file)).toThrowError(/cannot be combined/);
+  });
 });
 
 describe('seedStoreFromFile', () => {

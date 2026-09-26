@@ -55,6 +55,50 @@ describe('validateMockDefinition — acceptance', () => {
     expect(validateMockDefinition({ method: 'GET', uri: '/files/*' }).ok).toBe(true);
     expect(validateMockDefinition({ method: 'GET', uri: '/' }).ok).toBe(true);
   });
+
+  it('accepts a valid bodySchema and round-trips it into the value', () => {
+    const bodySchema = {
+      type: 'object',
+      required: ['name'],
+      properties: { name: { type: 'string' } },
+    };
+    const result = validateMockDefinition({ method: 'POST', uri: '/orders', bodySchema });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.bodySchema).toEqual(bodySchema);
+  });
+
+  it('omits bodySchema from the value when not declared', () => {
+    const result = validateMockDefinition({ method: 'GET', uri: '/x' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect('bodySchema' in result.value).toBe(false);
+  });
+
+  it('accepts a valid responseSchema and round-trips it into the value', () => {
+    const responseSchema = {
+      type: 'object',
+      required: ['id'],
+      properties: { id: { type: 'integer' } },
+    };
+    const result = validateMockDefinition({ method: 'GET', uri: '/users/:id', responseSchema });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.responseSchema).toEqual(responseSchema);
+  });
+
+  it('omits responseSchema from the value when not declared', () => {
+    const result = validateMockDefinition({ method: 'GET', uri: '/x' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect('responseSchema' in result.value).toBe(false);
+  });
+
+  it('accepts bodySchema and responseSchema together (request validation plus generated response)', () => {
+    const result = validateMockDefinition({
+      method: 'POST',
+      uri: '/orders',
+      bodySchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+      responseSchema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } },
+    });
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe('validateMockDefinition — rejection', () => {
@@ -110,6 +154,55 @@ describe('validateMockDefinition — rejection', () => {
   it('rejects non-JSON body values', () => {
     expect(errorsOf({ method: 'GET', uri: '/x', body: () => {} })[0].field).toBe('body');
     expect(errorsOf({ method: 'GET', uri: '/x', body: { nested: Symbol('s') } })[0].field).toBe('body');
+  });
+
+  it('rejects a bodySchema that is not a JSON object', () => {
+    for (const bodySchema of ['nope', 42, null, [{ type: 'object' }]]) {
+      const errors = errorsOf({ method: 'GET', uri: '/x', bodySchema });
+      expect(errors[0].field, JSON.stringify(bodySchema)).toBe('bodySchema');
+      expect(errors[0].message).toMatch(/must be a JSON object/);
+    }
+  });
+
+  it('rejects an invalid JSON Schema in bodySchema', () => {
+    const errors = errorsOf({ method: 'GET', uri: '/x', bodySchema: { type: 'nope' } });
+    expect(errors[0].field).toBe('bodySchema');
+    expect(errors[0].message).toMatch(/not a valid JSON Schema/);
+  });
+
+  it('rejects a responseSchema that is not a JSON object', () => {
+    for (const responseSchema of ['nope', 42, null, [{ type: 'object' }]]) {
+      const errors = errorsOf({ method: 'GET', uri: '/x', responseSchema });
+      expect(errors[0].field, JSON.stringify(responseSchema)).toBe('responseSchema');
+      expect(errors[0].message).toMatch(/must be a JSON object/);
+    }
+  });
+
+  it('rejects an invalid or unsupported responseSchema via trial generation', () => {
+    const invalid = errorsOf({ method: 'GET', uri: '/x', responseSchema: { type: 'nope' } });
+    expect(invalid[0].field).toBe('responseSchema');
+    expect(invalid[0].message).toMatch(/not a valid JSON Schema/);
+
+    const badVersion = errorsOf({
+      method: 'GET',
+      uri: '/x',
+      responseSchema: { $schema: 'http://json-schema.org/draft-04/schema#', type: 'object' },
+    });
+    expect(badVersion[0].field).toBe('responseSchema');
+    expect(badVersion[0].message).toMatch(/Unsupported JSON Schema version/);
+  });
+
+  it('rejects a definition combining body and responseSchema, naming both fields', () => {
+    const errors = errorsOf({
+      method: 'GET',
+      uri: '/x',
+      body: { static: true },
+      responseSchema: { type: 'object' },
+    });
+    const conflict = errors.find((e) => /cannot be combined/.test(e.message));
+    expect(conflict?.field).toBe('responseSchema');
+    expect(conflict?.message).toContain('body');
+    expect(conflict?.message).toContain('responseSchema');
   });
 
   it('collects multiple field errors at once', () => {

@@ -7,6 +7,8 @@ export interface MockJson {
   status: number;
   headers: Record<string, string>;
   body?: unknown;
+  bodySchema?: unknown;
+  responseSchema?: unknown;
 }
 
 /** Public projection of a stored mock for admin API responses. */
@@ -19,6 +21,8 @@ export function toMockJson(route: MockRoute): MockJson {
     headers: { ...route.headers },
   };
   if (route.body !== undefined) out.body = route.body;
+  if (route.bodySchema !== undefined) out.bodySchema = route.bodySchema;
+  if (route.responseSchema !== undefined) out.responseSchema = route.responseSchema;
   return out;
 }
 
@@ -48,9 +52,9 @@ export function buildMockResponse(mock: MockRoute, opts: { omitBody?: boolean } 
   return new Response(mustOmitBody ? null : bodyText, { status: mock.status, headers });
 }
 
-/** JSON 404 for requests no mock matches, naming method and path. */
+/** JSON 500 for requests no mock matches, naming method and path. */
 export function unmatchedResponse(method: string, path: string): Response {
-  return jsonResponse(404, {
+  return jsonResponse(500, {
     error: { message: 'no mock matches this request', method, path },
   });
 }
@@ -63,6 +67,20 @@ export function adminErrorResponse(
 ): Response {
   return jsonResponse(status, {
     error: details ? { message, details } : { message },
+  });
+}
+
+/**
+ * JSON 400 for a request body that fails the matched mock's bodySchema
+ * (design D24): `details[].field` carries the JSON Schema instance path.
+ */
+export function bodySchemaRejectionResponse(
+  method: string,
+  path: string,
+  details: { field: string; message: string }[],
+): Response {
+  return jsonResponse(400, {
+    error: { message: 'request body failed bodySchema validation', method, path, details },
   });
 }
 

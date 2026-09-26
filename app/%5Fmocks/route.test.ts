@@ -89,6 +89,69 @@ describe('POST /_mocks', () => {
     const body = (await res.json()) as { error: { details: { field: string; message: string }[] } };
     expect(body.error.details).toContainEqual({ field: 'method', message: 'method is required' });
   });
+
+  it('registers a mock with a valid bodySchema and echoes it in the 201', async () => {
+    const bodySchema = {
+      type: 'object',
+      required: ['name'],
+      properties: { name: { type: 'string' } },
+    };
+    const res = await POST(postRequest({ method: 'POST', uri: '/orders', bodySchema }));
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as Record<string, unknown>;
+    expect(created.bodySchema).toEqual(bodySchema);
+    expect(getStore().list()[0].bodySchema).toEqual(bodySchema);
+  });
+
+  it('rejects an invalid bodySchema with 400 and registers nothing', async () => {
+    for (const bodySchema of [{ type: 'nope' }, 'not-an-object', 42]) {
+      const res = await POST(postRequest({ method: 'POST', uri: '/orders', bodySchema }));
+      expect(res.status, JSON.stringify(bodySchema)).toBe(400);
+      const body = (await res.json()) as { error: { details: { field: string }[] } };
+      expect(body.error.details.some((d) => d.field === 'bodySchema')).toBe(true);
+    }
+    expect(getStore().list()).toEqual([]);
+  });
+
+  it('registers a mock with a valid responseSchema and echoes it in the 201', async () => {
+    const responseSchema = {
+      type: 'object',
+      required: ['id', 'name'],
+      properties: { id: { type: 'integer' }, name: { type: 'string' } },
+    };
+    const res = await POST(postRequest({ method: 'GET', uri: '/users/:id', responseSchema }));
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as Record<string, unknown>;
+    expect(created.responseSchema).toEqual(responseSchema);
+    expect(getStore().list()[0].responseSchema).toEqual(responseSchema);
+  });
+
+  it('rejects an invalid responseSchema with 400 and registers nothing', async () => {
+    for (const responseSchema of [{ type: 'nope' }, 'not-an-object', 42]) {
+      const res = await POST(postRequest({ method: 'GET', uri: '/gen', responseSchema }));
+      expect(res.status, JSON.stringify(responseSchema)).toBe(400);
+      const body = (await res.json()) as { error: { details: { field: string }[] } };
+      expect(body.error.details.some((d) => d.field === 'responseSchema')).toBe(true);
+    }
+    expect(getStore().list()).toEqual([]);
+  });
+
+  it('rejects a payload combining body and responseSchema with 400 and registers nothing', async () => {
+    const res = await POST(
+      postRequest({
+        method: 'GET',
+        uri: '/gen',
+        body: { static: true },
+        responseSchema: { type: 'object' },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const payload = (await res.json()) as { error: { details: { field: string; message: string }[] } };
+    const conflict = payload.error.details.find((d) => /cannot be combined/.test(d.message));
+    expect(conflict?.field).toBe('responseSchema');
+    expect(conflict?.message).toContain('body');
+    expect(getStore().list()).toEqual([]);
+  });
 });
 
 describe('GET /_mocks', () => {
@@ -119,6 +182,26 @@ describe('GET /_mocks', () => {
     await POST(postRequest({ method: 'GET', uri: '/data', body }));
     const list = (await GET().json()) as Record<string, unknown>[];
     expect(list[0].body).toEqual(body);
+  });
+
+  it('includes bodySchema in the listing for mocks that declare it', async () => {
+    const bodySchema = { type: 'object', properties: { a: { type: 'integer' } } };
+    await POST(postRequest({ method: 'POST', uri: '/with-schema', bodySchema }));
+    await POST(postRequest({ method: 'GET', uri: '/without-schema' }));
+
+    const list = (await GET().json()) as Record<string, unknown>[];
+    expect(list[0].bodySchema).toEqual(bodySchema);
+    expect('bodySchema' in list[1]).toBe(false);
+  });
+
+  it('includes responseSchema in the listing for mocks that declare it and omits it for others', async () => {
+    const responseSchema = { type: 'object', properties: { a: { type: 'integer' } } };
+    await POST(postRequest({ method: 'GET', uri: '/generated', responseSchema }));
+    await POST(postRequest({ method: 'GET', uri: '/static', body: 'x' }));
+
+    const list = (await GET().json()) as Record<string, unknown>[];
+    expect(list[0].responseSchema).toEqual(responseSchema);
+    expect('responseSchema' in list[1]).toBe(false);
   });
 });
 

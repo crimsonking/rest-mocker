@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getStore, MockStore, resolveDbPath } from './store.ts';
 import { findMatchingMock } from './matcher.ts';
@@ -125,6 +126,30 @@ describe('MockStore', () => {
     store.deleteById(route.id);
     expect(store.isEmpty()).toBe(true);
   });
+
+  it('round-trips bodySchema and leaves it absent when not declared', () => {
+    const bodySchema = { type: 'object', required: ['name'], properties: { name: { type: 'string' } } };
+    const withSchema = store.add({ method: 'POST', uri: '/orders', bodySchema });
+    const without = store.add({ method: 'GET', uri: '/plain' });
+
+    const storedWith = store.list().find((r) => r.id === withSchema.id);
+    const storedWithout = store.list().find((r) => r.id === without.id);
+    expect(storedWith).toEqual(withSchema);
+    expect(storedWith?.bodySchema).toEqual(bodySchema);
+    expect(storedWithout && 'bodySchema' in storedWithout).toBe(false);
+  });
+
+  it('round-trips responseSchema and leaves it absent when not declared', () => {
+    const responseSchema = { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } };
+    const withSchema = store.add({ method: 'GET', uri: '/users/:id', responseSchema });
+    const without = store.add({ method: 'GET', uri: '/plain' });
+
+    const storedWith = store.list().find((r) => r.id === withSchema.id);
+    const storedWithout = store.list().find((r) => r.id === without.id);
+    expect(storedWith).toEqual(withSchema);
+    expect(storedWith?.responseSchema).toEqual(responseSchema);
+    expect(storedWithout && 'responseSchema' in storedWithout).toBe(false);
+  });
 });
 
 // A restart is modeled as close() + reopening the same database file (design
@@ -207,6 +232,102 @@ describe('MockStore restart persistence', () => {
     expect(second.list()).toEqual([]);
     expect(second.isEmpty()).toBe(true);
     second.close();
+  });
+
+  it('keeps bodySchema intact across a restart', () => {
+    const file = tempDbFile();
+    const first = new MockStore(file);
+    const added = first.add({
+      method: 'POST',
+      uri: '/orders',
+      bodySchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+    });
+    first.close();
+
+    const second = new MockStore(file);
+    expect(second.list()).toEqual([added]);
+    expect(second.list()[0].bodySchema).toEqual(added.bodySchema);
+    second.close();
+  });
+
+  it('keeps responseSchema intact across a restart', () => {
+    const file = tempDbFile();
+    const first = new MockStore(file);
+    const added = first.add({
+      method: 'GET',
+      uri: '/users/:id',
+      responseSchema: { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } },
+    });
+    first.close();
+
+    const second = new MockStore(file);
+    expect(second.list()).toEqual([added]);
+    expect(second.list()[0].responseSchema).toEqual(added.responseSchema);
+    second.close();
+  });
+
+  it('migrates a pre-body_schema database in place and lists old rows without the field', () => {
+    const file = tempDbFile();
+    // Recreate the table exactly as the pre-migration schema defined it,
+    // then let MockStore.open add the missing column on first contact.
+    const legacy = new DatabaseSync(file);
+    legacy.exec(`CREATE TABLE mocks (
+      id TEXT PRIMARY KEY,
+      method TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      status INTEGER NOT NULL,
+      headers TEXT NOT NULL,
+      body TEXT NULL,
+      seq INTEGER NOT NULL UNIQUE
+    )`);
+    legacy
+      .prepare('INSERT INTO mocks (id, method, uri, status, headers, body, seq) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('legacy-id', 'GET', '/old', 200, '{}', null, 1);
+    legacy.close();
+
+    const store = new MockStore(file);
+    const rows = store.list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: 'legacy-id', method: 'GET', uri: '/old' });
+    expect(rows[0] && 'bodySchema' in rows[0]).toBe(false);
+
+    // The migrated table accepts new rows with a schema.
+    const added = store.add({ method: 'POST', uri: '/new', bodySchema: { type: 'object' } });
+    expect(store.list().find((r) => r.id === added.id)?.bodySchema).toEqual({ type: 'object' });
+    store.close();
+  });
+
+  it('migrates a body_schema-era database missing only response_schema', () => {
+    const file = tempDbFile();
+    // Intermediate shape: created after body_schema existed but before
+    // response_schema did — the migration must add only the missing column.
+    const legacy = new DatabaseSync(file);
+    legacy.exec(`CREATE TABLE mocks (
+      id TEXT PRIMARY KEY,
+      method TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      status INTEGER NOT NULL,
+      headers TEXT NOT NULL,
+      body TEXT NULL,
+      body_schema TEXT NULL,
+      seq INTEGER NOT NULL UNIQUE
+    )`);
+    legacy
+      .prepare(
+        'INSERT INTO mocks (id, method, uri, status, headers, body, body_schema, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run('mid-era-id', 'POST', '/orders', 200, '{}', null, '{"type":"object"}', 1);
+    legacy.close();
+
+    const store = new MockStore(file);
+    const rows = store.list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: 'mid-era-id', bodySchema: { type: 'object' } });
+    expect(rows[0] && 'responseSchema' in rows[0]).toBe(false);
+
+    const added = store.add({ method: 'GET', uri: '/gen', responseSchema: { type: 'integer' } });
+    expect(store.list().find((r) => r.id === added.id)?.responseSchema).toEqual({ type: 'integer' });
+    store.close();
   });
 });
 

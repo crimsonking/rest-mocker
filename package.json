@@ -17,6 +17,8 @@
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
+    "json-schema-faker": "^0.6.3",
     "next": "15.5.26",
     "react": "19.3.0",
     "react-dom": "19.3.0"
