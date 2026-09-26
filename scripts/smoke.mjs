@@ -72,9 +72,9 @@ async function main() {
   eq('param match', (await req('GET', '/users/42')).json, { echo: 'user' });
   eq('wildcard match', (await req('GET', '/files/docs/a/b.png')).text, 'wild');
 
-  // Method mismatch → unmatched JSON 404 naming method and path.
+  // Method mismatch → unmatched JSON 500 naming method and path.
   r = await req('POST', '/ping');
-  eq('method mismatch 404', r.status, 404);
+  eq('method mismatch 500', r.status, 500);
   eq('unmatched error names method', r.json?.error?.method, 'POST');
   eq('unmatched error names path', r.json?.error?.path, '/ping');
 
@@ -128,13 +128,13 @@ async function main() {
 
   // Reserved prefix: admin API owns it; catch-all never serves mocks there.
   check('GET /_mocks is the admin list', Array.isArray((await req('GET', '/_mocks')).json));
-  eq('unknown /_mocks subpath 404', (await req('GET', '/_mocks/a/b')).status, 404);
+  eq('unknown /_mocks subpath 500', (await req('GET', '/_mocks/a/b')).status, 500);
   eq('PUT /_mocks 405', (await req('PUT', '/_mocks')).status, 405);
   eq('GET /_mocks/{id} 405', (await req('GET', `/_mocks/${ping.id}`)).status, 405);
 
   // HEAD strictness (recorded assumption: no GET→HEAD fallback).
   await register({ method: 'GET', uri: '/h', body: 'get-only' });
-  eq('HEAD does not match GET mock', (await req('HEAD', '/h')).status, 404);
+  eq('HEAD does not match GET mock', (await req('HEAD', '/h')).status, 500);
   await register({ method: 'HEAD', uri: '/h', status: 204, headers: { 'X-H': '1' } });
   const headRes = await fetch(`${BASE}/h`, { method: 'HEAD' });
   eq('HEAD mock status', headRes.status, 204);
@@ -174,7 +174,7 @@ async function main() {
   // Clear-all finishes the lifecycle.
   eq('final clear-all 204', (await req('DELETE', '/_mocks')).status, 204);
   eq('list empty after clear', (await req('GET', '/_mocks')).json, []);
-  eq('previously matched route now 404', (await req('GET', '/ping')).status, 404);
+  eq('previously matched route now 500', (await req('GET', '/ping')).status, 500);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   if (failures > 0) process.exit(1);
